@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Expense - Expense Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-sidebar { background: linear-gradient(180deg, #667eea 0%, #764ba2 100%); }
+        .nav-link { transition: all 0.3s ease; }
+        .nav-link:hover, .nav-link.active { background: rgba(255, 255, 255, 0.2); transform: translateX(5px); }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .category-card { transition: all 0.3s ease; cursor: pointer; }
+        .category-card:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+        .category-card.selected { border-color: #667eea; background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); }
+        .input-focus { transition: all 0.3s ease; }
+        .input-focus:focus { transform: scale(1.01); box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="flex">
+        <!-- Sidebar -->
+        <aside class="w-72 gradient-sidebar min-h-screen fixed left-0 top-0 p-6">
+            <div class="flex items-center space-x-3 mb-10">
+                <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <i class="fas fa-wallet text-white text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-white font-bold text-xl">ExpenseTracker</h1>
+                    <p class="text-purple-200 text-sm">Smart Finance</p>
+                </div>
+            </div>
+
+            <nav class="space-y-2">
+                <a href="dashboard.html" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-xl text-purple-100 hover:text-white">
+                    <i class="fas fa-home w-6"></i>
+                    <span class="font-medium">Dashboard</span>
+                </a>
+                <a href="expenses.html" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-xl text-purple-100 hover:text-white">
+                    <i class="fas fa-receipt w-6"></i>
+                    <span class="font-medium">My Expenses</span>
+                </a>
+                <a href="add-expense.html" class="nav-link active flex items-center space-x-3 px-4 py-3 rounded-xl text-white">
+                    <i class="fas fa-plus-circle w-6"></i>
+                    <span class="font-medium">Add Expense</span>
+                </a>
+            </nav>
+
+            <div class="absolute bottom-6 left-6 right-6">
+                <div class="bg-white/10 rounded-xl p-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                            <i class="fas fa-user text-white"></i>
+                        </div>
+                        <div class="flex-1">
+                            <p id="user-name" class="text-white font-medium text-sm"></p>
+                            <p class="text-purple-200 text-xs">Premium User</p>
+                        </div>
+                        <button onclick="logout()" class="text-purple-200 hover:text-white transition">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 ml-72 p-8">
+            <div class="mb-8 fade-in">
+                <h2 class="text-3xl font-bold text-gray-800">Add New Expense</h2>
+                <p class="text-gray-500 mt-1">Record your spending to keep track of your finances</p>
+            </div>
+
+            <div class="max-w-3xl">
+                <!-- Success/Error Message -->
+                <div id="message" class="hidden mb-6 p-4 rounded-xl fade-in"></div>
+
+                <form id="add-expense-form" class="space-y-8">
+                    <!-- Amount Card -->
+                    <div class="bg-white rounded-2xl shadow-sm p-8 fade-in">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-rupee-sign text-purple-600 mr-2"></i>Amount
+                        </h3>
+                        <div class="relative">
+                            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-3xl text-gray-400">₹</span>
+                            <input 
+                                type="number" 
+                                id="amount" 
+                                step="0.01" 
+                                min="0.01"
+                                required
+                                placeholder="0.00"
+                                class="w-full pl-12 pr-4 py-5 text-3xl font-bold text-gray-800 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none input-focus"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Category Selection -->
+                    <div class="bg-white rounded-2xl shadow-sm p-8 fade-in" style="animation-delay: 0.1s">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-tags text-purple-600 mr-2"></i>Category
+                        </h3>
+                        <div class="grid grid-cols-4 gap-4">
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Food">
+                                <div class="text-3xl mb-2">🍔</div>
+                                <p class="text-sm font-medium text-gray-700">Food</p>
+                            </div>
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Transport">
+                                <div class="text-3xl mb-2">🚗</div>
+                                <p class="text-sm font-medium text-gray-700">Transport</p>
+                            </div>
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Shopping">
+                                <div class="text-3xl mb-2">🛍️</div>
+                                <p class="text-sm font-medium text-gray-700">Shopping</p>
+                            </div>
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Bills">
+                                <div class="text-3xl mb-2">📄</div>
+                                <p class="text-sm font-medium text-gray-700">Bills</p>
+                            </div>
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Entertainment">
+                                <div class="text-3xl mb-2">🎬</div>
+                                <p class="text-sm font-medium text-gray-700">Entertainment</p>
+                            </div>
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Health">
+                                <div class="text-3xl mb-2">🏥</div>
+                                <p class="text-sm font-medium text-gray-700">Health</p>
+                            </div>
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Education">
+                                <div class="text-3xl mb-2">📚</div>
+                                <p class="text-sm font-medium text-gray-700">Education</p>
+                            </div>
+                            <div class="category-card border-2 border-gray-200 rounded-xl p-4 text-center" data-category="Other">
+                                <div class="text-3xl mb-2">📦</div>
+                                <p class="text-sm font-medium text-gray-700">Other</p>
+                            </div>
+                        </div>
+                        <input type="hidden" id="category" required>
+                    </div>
+
+                    <!-- Details Card -->
+                    <div class="bg-white rounded-2xl shadow-sm p-8 fade-in" style="animation-delay: 0.2s">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-info-circle text-purple-600 mr-2"></i>Details
+                        </h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                                <input 
+                                    type="text" 
+                                    id="description" 
+                                    placeholder="What did you spend on?"
+                                    class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none input-focus"
+                                >
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Date</label>
+                                <input 
+                                    type="date" 
+                                    id="date" 
+                                    required
+                                    class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none input-focus"
+                                >
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="flex space-x-4 fade-in" style="animation-delay: 0.3s">
+                        <button 
+                            type="submit" 
+                            class="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-xl font-semibold text-lg hover:shadow-lg transition flex items-center justify-center space-x-2"
+                        >
+                            <i class="fas fa-plus-circle"></i>
+                            <span>Add Expense</span>
+                        </button>
+                        <a 
+                            href="expenses.html" 
+                            class="px-8 py-4 bg-gray-200 text-gray-700 rounded-xl font-semibold text-lg hover:bg-gray-300 transition flex items-center justify-center"
+                        >
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+
+                <!-- Quick Tips -->
+                <div class="mt-8 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-2xl p-6 fade-in" style="animation-delay: 0.4s">
+                    <h4 class="font-semibold text-purple-800 mb-3">
+                        <i class="fas fa-lightbulb text-yellow-500 mr-2"></i>Quick Tips
+                    </h4>
+                    <ul class="text-sm text-purple-700 space-y-2">
+                        <li class="flex items-start space-x-2">
+                            <i class="fas fa-check text-green-500 mt-1"></i>
+                            <span>Add expenses as soon as you make them to keep accurate records</span>
+                        </li>
+                        <li class="flex items-start space-x-2">
+                            <i class="fas fa-check text-green-500 mt-1"></i>
+                            <span>Use clear descriptions to easily identify expenses later</span>
+                        </li>
+                        <li class="flex items-start space-x-2">
+                            <i class="fas fa-check text-green-500 mt-1"></i>
+                            <span>Categorize correctly to get accurate spending insights</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/add-expense.js"></script>
+</body>
+</html>
