@@ -12,15 +12,20 @@ async function loadDashboard() {
         });
         const statsData = await statsResponse.json();
 
-        if (statsResponse.ok) {
-            updateStats(statsData);
-            renderCategoryChart(statsData.categoryBreakdown);
-            renderCategoryList(statsData.categoryBreakdown);
-        }
         const expensesResponse = await fetch(API.expenses.base, {
             headers: getAuthHeaders()
         });
         const expensesData = await expensesResponse.json();
+
+        if (statsResponse.ok) {
+            let overallSpending = 0;
+            if (expensesData.expenses && expensesData.expenses.length > 0) {
+                overallSpending = expensesData.expenses.reduce((sum, expense) => sum + parseFloat(expense.amount || 0), 0);
+            }
+            updateStats(statsData, overallSpending);
+            renderCategoryChart(statsData.categoryBreakdown);
+            renderCategoryList(statsData.categoryBreakdown);
+        }
 
         if (expensesResponse.ok) {
             renderRecentExpenses(expensesData.expenses.slice(0, 5));
@@ -30,8 +35,9 @@ async function loadDashboard() {
         console.error('Dashboard error:', error);
     }
 }
-function updateStats(stats) {
-    document.getElementById('total-spending').textContent = `₹${stats.totalSpending.toFixed(2)}`;
+function updateStats(stats, overallSpending) {
+    document.getElementById('overall-spending').textContent = 'Rs. ' + overallSpending.toFixed(2);
+    document.getElementById('total-spending').textContent = 'Rs. ' + stats.totalSpending.toFixed(2);
     document.getElementById('expense-count').textContent = stats.expenseCount;
     document.getElementById('current-month').textContent = stats.month;
 }
@@ -118,7 +124,7 @@ function renderCategoryList(categoryBreakdown) {
                     <span class="text-gray-700">${category}</span>
                 </div>
                 <div class="text-right">
-                    <span class="font-medium text-gray-800">₹${amount.toFixed(2)}</span>
+                    <span class="font-medium text-gray-800">Rs. ${amount.toFixed(2)}</span>
                     <span class="text-gray-500 text-sm ml-2">(${percentage}%)</span>
                 </div>
             </div>
@@ -148,7 +154,7 @@ function renderRecentExpenses(expenses) {
                 </span>
             </td>
             <td class="py-4 text-gray-600">${expense.description || '-'}</td>
-            <td class="py-4 text-right font-medium">₹${parseFloat(expense.amount).toFixed(2)}</td>
+            <td class="py-4 text-right font-medium">Rs. ${parseFloat(expense.amount).toFixed(2)}</td>
         </tr>
     `).join('');
 }

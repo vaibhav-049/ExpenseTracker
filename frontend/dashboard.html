@@ -119,13 +119,27 @@
             </div>
 
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <!-- Total Spending -->
-                <div class="bg-gradient-to-r from-purple-500 to-purple-700 rounded-2xl p-6 text-white card-hover fade-in">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <!-- Total Spending (All Time) -->
+                <div class="bg-gradient-to-r from-pink-500 to-red-500 rounded-2xl p-6 text-white card-hover fade-in">
                     <div class="flex justify-between items-start">
                         <div>
-                            <p class="text-purple-200 text-sm font-medium">Total Spending</p>
-                            <p id="total-spending" class="text-4xl font-bold mt-2">₹0</p>
+                            <p class="text-pink-200 text-sm font-medium">Total Spending</p>
+                            <p id="overall-spending" class="text-3xl font-bold mt-2">₹0</p>
+                            <p class="text-pink-200 text-sm mt-2">All time</p>
+                        </div>
+                        <div class="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-chart-line text-2xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Total Spending (This Month) -->
+                <div class="bg-gradient-to-r from-purple-500 to-purple-700 rounded-2xl p-6 text-white card-hover fade-in" style="animation-delay: 0.1s">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-purple-200 text-sm font-medium">Monthly Spending</p>
+                            <p id="total-spending" class="text-3xl font-bold mt-2">₹0</p>
                             <p class="text-purple-200 text-sm mt-2">This month</p>
                         </div>
                         <div class="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
@@ -134,12 +148,12 @@
                     </div>
                 </div>
 
-                <!-- Total Expenses -->
-                <div class="bg-gradient-to-r from-blue-500 to-blue-700 rounded-2xl p-6 text-white card-hover fade-in" style="animation-delay: 0.1s">
+                <!-- Total Transactions -->
+                <div class="bg-gradient-to-r from-blue-500 to-blue-700 rounded-2xl p-6 text-white card-hover fade-in" style="animation-delay: 0.2s">
                     <div class="flex justify-between items-start">
                         <div>
                             <p class="text-blue-200 text-sm font-medium">Total Transactions</p>
-                            <p id="expense-count" class="text-4xl font-bold mt-2">0</p>
+                            <p id="expense-count" class="text-3xl font-bold mt-2">0</p>
                             <p class="text-blue-200 text-sm mt-2">Expenses recorded</p>
                         </div>
                         <div class="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
@@ -149,7 +163,7 @@
                 </div>
 
                 <!-- Current Month -->
-                <div class="bg-gradient-to-r from-emerald-500 to-emerald-700 rounded-2xl p-6 text-white card-hover fade-in" style="animation-delay: 0.2s">
+                <div class="bg-gradient-to-r from-emerald-500 to-emerald-700 rounded-2xl p-6 text-white card-hover fade-in" style="animation-delay: 0.3s">
                     <div class="flex justify-between items-start">
                         <div>
                             <p class="text-emerald-200 text-sm font-medium">Current Period</p>
