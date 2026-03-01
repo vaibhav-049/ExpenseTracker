@@ -1,4 +1,4 @@
-function openMonthModal() {
+window.openMonthModal = function() {
     const modal = document.getElementById('month-modal');
     const monthsList = document.getElementById('months-list');
     
@@ -39,7 +39,7 @@ function openMonthModal() {
                     e.preventDefault();
                     const monthKey = this.getAttribute('data-month');
                     console.log('Button clicked for month:', monthKey);
-                    exportMonthPDF(monthKey);
+                    window.exportMonthPDF(monthKey);
                 });
             });
         }
@@ -50,19 +50,19 @@ function openMonthModal() {
         console.error('Error fetching months:', error);
         alert('Error loading months');
     });
-}
+};
 
-function closeMonthModal() {
+window.closeMonthModal = function() {
     document.getElementById('month-modal').classList.add('hidden');
-}
+};
 
-function exportMonthPDF(monthKey) {
+window.exportMonthPDF = function(monthKey) {
     console.log('Exporting month:', monthKey);
-    closeMonthModal();
+    window.closeMonthModal();
     setTimeout(() => {
         exportToPDF(monthKey);
     }, 100);
-}
+};
 
 async function exportToPDF(selectedMonth) {
     try {
