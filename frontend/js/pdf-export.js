@@ -1,15 +1,27 @@
 window.openMonthModal = function() {
+    console.log('openMonthModal called');
     const modal = document.getElementById('month-modal');
     const monthsList = document.getElementById('months-list');
     
+    if (!modal) {
+        console.error('Modal element not found');
+        alert('Modal element not found');
+        return;
+    }
+    
+    console.log('Fetching expenses...');
     fetch(API.expenses.base, {
         headers: getAuthHeaders()
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('Response status:', response.status);
+        return response.json();
+    })
     .then(data => {
+        console.log('Data received:', data);
         const monthsData = {};
         
-        if (data.expenses) {
+        if (data.expenses && data.expenses.length > 0) {
             data.expenses.forEach(expense => {
                 const date = new Date(expense.date);
                 const monthKey = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
@@ -23,32 +35,25 @@ window.openMonthModal = function() {
         }
         
         const sortedMonths = Object.entries(monthsData).sort().reverse();
+        console.log('Sorted months:', sortedMonths);
         
         if (sortedMonths.length === 0) {
-            monthsList.innerHTML = '<p class="text-center text-gray-500 py-4">No expenses yet</p>';
+            monthsList.innerHTML = '<p class="text-center text-gray-500 py-8">No expenses yet</p>';
         } else {
             monthsList.innerHTML = sortedMonths.map(([monthKey, monthData]) => `
-                <button class="month-export-btn w-full flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl hover:from-purple-100 hover:to-indigo-100 hover:border-purple-400 transition" data-month="${monthKey}">
+                <div class="w-full flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl hover:from-purple-100 hover:to-indigo-100 hover:border-purple-400 transition cursor-pointer" onclick="window.exportMonthPDF('${monthKey}')">
                     <span class="font-semibold text-gray-800">${monthData.label}</span>
                     <span class="text-lg font-bold text-purple-600">Rs. ${monthData.total.toFixed(2)}</span>
-                </button>
+                </div>
             `).join('');
-            
-            document.querySelectorAll('.month-export-btn').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    const monthKey = this.getAttribute('data-month');
-                    console.log('Button clicked for month:', monthKey);
-                    window.exportMonthPDF(monthKey);
-                });
-            });
         }
         
+        console.log('Showing modal');
         modal.classList.remove('hidden');
     })
     .catch(error => {
         console.error('Error fetching months:', error);
-        alert('Error loading months');
+        alert('Error loading months: ' + error.message);
     });
 };
 
