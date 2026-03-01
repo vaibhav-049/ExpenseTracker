@@ -28,11 +28,20 @@ function openMonthModal() {
             monthsList.innerHTML = '<p class="text-center text-gray-500 py-4">No expenses yet</p>';
         } else {
             monthsList.innerHTML = sortedMonths.map(([monthKey, monthData]) => `
-                <button onclick="exportMonthPDF('${monthKey}')" class="w-full flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl hover:from-purple-100 hover:to-indigo-100 hover:border-purple-400 transition">
+                <button class="month-export-btn w-full flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl hover:from-purple-100 hover:to-indigo-100 hover:border-purple-400 transition" data-month="${monthKey}">
                     <span class="font-semibold text-gray-800">${monthData.label}</span>
                     <span class="text-lg font-bold text-purple-600">Rs. ${monthData.total.toFixed(2)}</span>
                 </button>
             `).join('');
+            
+            document.querySelectorAll('.month-export-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const monthKey = this.getAttribute('data-month');
+                    console.log('Button clicked for month:', monthKey);
+                    exportMonthPDF(monthKey);
+                });
+            });
         }
         
         modal.classList.remove('hidden');
@@ -48,13 +57,18 @@ function closeMonthModal() {
 }
 
 function exportMonthPDF(monthKey) {
+    console.log('Exporting month:', monthKey);
     closeMonthModal();
-    exportToPDF(monthKey);
+    setTimeout(() => {
+        exportToPDF(monthKey);
+    }, 100);
 }
 
 async function exportToPDF(selectedMonth) {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
+    try {
+        console.log('Starting PDF export for month:', selectedMonth);
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
     
     const user = JSON.parse(localStorage.getItem('user'));
     const userName = user ? user.name : 'User';
@@ -234,7 +248,9 @@ async function exportToPDF(selectedMonth) {
         }
         
         const fileName = 'Expense_Report_' + (selectedMonth || new Date().toISOString().split('T')[0]) + '.pdf';
+        console.log('Saving PDF with filename:', fileName);
         doc.save(fileName);
+        console.log('PDF saved successfully');
         
         showExportSuccess('PDF exported successfully!');
         
