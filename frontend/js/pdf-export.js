@@ -1,21 +1,126 @@
+// Initialize month selector when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
     const exportBtn = document.getElementById('export-pdf-btn');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+    const cancelModalBtn = document.getElementById('cancel-modal-btn');
+    const monthModal = document.getElementById('month-modal');
+    
     if (exportBtn) {
-        exportBtn.addEventListener('click', function() {
-            exportToPDF();
+        exportBtn.addEventListener('click', openMonthModal);
+    }
+    
+    if (closeModalBtn) {
+        closeModalBtn.addEventListener('click', closeMonthModal);
+    }
+    
+    if (cancelModalBtn) {
+        cancelModalBtn.addEventListener('click', closeMonthModal);
+    }
+    
+    // Close modal when clicking outside
+    if (monthModal) {
+        monthModal.addEventListener('click', function(e) {
+            if (e.target === monthModal) {
+                closeMonthModal();
+            }
         });
     }
 });
 
-async function exportToPDF() {
+function openMonthModal() {
+    console.log('Opening month modal');
+    const modal = document.getElementById('month-modal');
+    const monthsList = document.getElementById('months-list');
+    
+    if (!modal || !monthsList) {
+        console.error('Modal or months-list element not found');
+        alert('Error: Modal elements not found');
+        return;
+    }
+    
+    monthsList.innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-purple-600 text-2xl"></i><p class="text-gray-600 mt-4">Loading months...</p></div>';
+    modal.classList.remove('hidden');
+    
+    // Fetch expenses to build month list
+    fetch(API.expenses.base, {
+        headers: getAuthHeaders()
+    })
+    .then(response => {
+        if (!response.ok) throw new Error('Failed to fetch expenses');
+        return response.json();
+    })
+    .then(data => {
+        console.log('Expenses data:', data);
+        const monthsData = {};
+        
+        if (data.expenses && Array.isArray(data.expenses) && data.expenses.length > 0) {
+            data.expenses.forEach(expense => {
+                const date = new Date(expense.date);
+                const monthKey = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
+                const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+                
+                if (!monthsData[monthKey]) {
+                    monthsData[monthKey] = { label: monthLabel, total: 0 };
+                }
+                monthsData[monthKey].total += parseFloat(expense.amount || 0);
+            });
+        }
+        
+        const sortedMonths = Object.entries(monthsData).sort().reverse();
+        console.log('Sorted months:', sortedMonths);
+        
+        if (sortedMonths.length === 0) {
+            monthsList.innerHTML = '<p class="text-center text-gray-500 py-8">No expenses yet</p>';
+        } else {
+            monthsList.innerHTML = sortedMonths.map(([monthKey, monthData]) => `
+                <div class="w-full flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl hover:from-purple-100 hover:to-indigo-100 hover:border-purple-400 transition cursor-pointer month-option" data-month-key="${monthKey}">
+                    <span class="font-semibold text-gray-800">${monthData.label}</span>
+                    <span class="text-lg font-bold text-purple-600">Rs. ${monthData.total.toFixed(2)}</span>
+                </div>
+            `).join('');
+            
+            // Add click handlers to month options
+            document.querySelectorAll('.month-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    const monthKey = this.getAttribute('data-month-key');
+                    handleMonthSelection(monthKey);
+                });
+            });
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching months:', error);
+        monthsList.innerHTML = '<p class="text-center text-red-500 py-8">Error loading months: ' + error.message + '</p>';
+    });
+}
+
+function closeMonthModal() {
+    console.log('Closing month modal');
+    const modal = document.getElementById('month-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function handleMonthSelection(monthKey) {
+    console.log('Selected month:', monthKey);
+    closeMonthModal();
+    // Small delay to ensure modal closes before PDF generation
+    setTimeout(() => {
+        exportToPDF(monthKey);
+    }, 300);
+}
+
+async function exportToPDF(selectedMonth) {
     try {
-        console.log('Export PDF clicked');
+        console.log('Starting PDF export for month:', selectedMonth);
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
         
         const user = JSON.parse(localStorage.getItem('user'));
         const userName = user ? user.name : 'User';
         
+        // Header
         doc.setFillColor(102, 126, 234);
         doc.rect(0, 0, 210, 45, 'F');
         
@@ -35,16 +140,35 @@ async function exportToPDF() {
         });
         doc.text('Report Date: ' + today, 14, 55);
         
-        const expensesResponse = await fetch(API.expenses.stats, {
+        const expensesResponse = await fetch(API.expenses.base, {
             headers: getAuthHeaders()
         });
-        const statsData = await expensesResponse.json();
+        const expensesData = await expensesResponse.json();
         
-        const expensesListResponse = await fetch(API.expenses.base, {
-            headers: getAuthHeaders()
+        let filteredExpenses = expensesData.expenses || [];
+        let monthLabel = selectedMonth;
+        let totalSpending = 0;
+        let categoryBreakdown = {};
+        
+        if (selectedMonth) {
+            const [year, month] = selectedMonth.split('-');
+            filteredExpenses = filteredExpenses.filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getFullYear() === parseInt(year) && 
+                       (expenseDate.getMonth() + 1) === parseInt(month);
+            });
+            
+            const monthName = new Date(year, month - 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+            monthLabel = monthName;
+        }
+        
+        filteredExpenses.forEach(expense => {
+            totalSpending += parseFloat(expense.amount || 0);
+            const cat = expense.category || 'Other';
+            categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + parseFloat(expense.amount || 0);
         });
-        const expensesData = await expensesListResponse.json();
         
+        // Summary Box
         doc.setFillColor(245, 247, 250);
         doc.roundedRect(14, 60, 182, 35, 3, 3, 'F');
         
@@ -60,25 +184,26 @@ async function exportToPDF() {
         doc.setFont('helvetica', 'bold');
         doc.text('Total Spending:', 20, 85);
         doc.setFont('helvetica', 'normal');
-        doc.text('Rs. ' + statsData.totalSpending.toFixed(2), 55, 85);
+        doc.text('Rs. ' + totalSpending.toFixed(2), 55, 85);
         
         doc.setFont('helvetica', 'bold');
         doc.text('Transactions:', 90, 85);
         doc.setFont('helvetica', 'normal');
-        doc.text(String(statsData.expenseCount), 125, 85);
+        doc.text(String(filteredExpenses.length), 125, 85);
         
         doc.setFont('helvetica', 'bold');
         doc.text('Period:', 145, 85);
         doc.setFont('helvetica', 'normal');
-        doc.text(statsData.month, 165, 85);
+        doc.text(String(monthLabel), 165, 85);
         
+        // Category Breakdown
         doc.setTextColor(102, 126, 234);
         doc.setFontSize(16);
         doc.setFont('helvetica', 'bold');
         doc.text('Category Breakdown', 14, 110);
         
         let yPos = 122;
-        const categories = Object.entries(statsData.categoryBreakdown);
+        const categories = Object.entries(categoryBreakdown);
         const categoryColors = {
             'Food': [59, 130, 246],
             'Transport': [16, 185, 129],
@@ -92,7 +217,7 @@ async function exportToPDF() {
         
         categories.forEach(([category, amount], index) => {
             const color = categoryColors[category] || [107, 114, 128];
-            const percentage = ((amount / statsData.totalSpending) * 100).toFixed(1);
+            const percentage = totalSpending > 0 ? ((amount / totalSpending) * 100).toFixed(1) : 0;
             
             doc.setFillColor(...color);
             doc.circle(20, yPos - 2, 4, 'F');
@@ -107,7 +232,7 @@ async function exportToPDF() {
             doc.setFont('helvetica', 'normal');
             doc.text('(' + percentage + '%)', 105, yPos);
             
-            const barWidth = Math.max((amount / statsData.totalSpending) * 70, 5);
+            const barWidth = totalSpending > 0 ? Math.max((amount / totalSpending) * 70, 5) : 5;
             doc.setFillColor(...color);
             doc.roundedRect(125, yPos - 5, barWidth, 7, 2, 2, 'F');
             
@@ -122,6 +247,7 @@ async function exportToPDF() {
         
         yPos += 12;
         
+        // Table Header
         doc.setFillColor(102, 126, 234);
         doc.rect(14, yPos, 182, 10, 'F');
         doc.setTextColor(255, 255, 255);
@@ -136,8 +262,8 @@ async function exportToPDF() {
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(50, 50, 50);
         
-        const recentExpenses = expensesData.expenses.slice(0, 15);
-        recentExpenses.forEach((expense, index) => {
+        const displayExpenses = filteredExpenses.slice(0, 15);
+        displayExpenses.forEach((expense, index) => {
             if (yPos > 270) {
                 doc.addPage();
                 yPos = 20;
@@ -162,6 +288,7 @@ async function exportToPDF() {
             yPos += 10;
         });
         
+        // Footer on all pages
         const pageCount = doc.internal.getNumberOfPages();
         for (let i = 1; i <= pageCount; i++) {
             doc.setPage(i);
@@ -171,8 +298,10 @@ async function exportToPDF() {
             doc.text('Generated by ExpenseTracker', 14, 290);
         }
         
-        const fileName = 'Expense_Report_' + new Date().toISOString().split('T')[0] + '.pdf';
+        const fileName = 'Expense_Report_' + (selectedMonth || new Date().toISOString().split('T')[0]) + '.pdf';
+        console.log('Saving PDF with filename:', fileName);
         doc.save(fileName);
+        console.log('PDF saved successfully');
         
         showExportSuccess('PDF exported successfully!');
         
