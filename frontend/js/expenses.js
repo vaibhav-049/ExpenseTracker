@@ -1,8 +1,26 @@
 document.addEventListener('DOMContentLoaded', () => {
     if (!checkAuth()) return;
     loadUserInfo();
+    initRealtimeExpenses();
     loadExpenses();
 });
+
+let expensesSocket = null;
+
+function initRealtimeExpenses() {
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (!user || !user.id || typeof io === 'undefined') return;
+
+    expensesSocket = io(API_BASE_URL.replace('/api', ''));
+    expensesSocket.on('connect', () => {
+        expensesSocket.emit('join', user.id);
+    });
+
+    expensesSocket.on('expense:changed', () => {
+        loadExpenses();
+    });
+}
+
 async function loadExpenses(filters = {}) {
     try {
         let url = API.expenses.base;

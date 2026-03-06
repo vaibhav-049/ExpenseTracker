@@ -1,10 +1,27 @@
 document.addEventListener('DOMContentLoaded', () => {
     if (!checkAuth()) return;
     loadUserInfo();
+    initRealtimeDashboard();
     loadDashboard();
 });
 
 let categoryChart = null;
+let dashboardSocket = null;
+
+function initRealtimeDashboard() {
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (!user || !user.id || typeof io === 'undefined') return;
+
+    dashboardSocket = io(API_BASE_URL.replace('/api', ''));
+    dashboardSocket.on('connect', () => {
+        dashboardSocket.emit('join', user.id);
+    });
+
+    dashboardSocket.on('expense:changed', () => {
+        loadDashboard();
+    });
+}
+
 async function loadDashboard() {
     try {
         const statsResponse = await fetch(API.expenses.stats, {

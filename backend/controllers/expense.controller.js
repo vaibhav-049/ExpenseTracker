@@ -5,6 +5,7 @@ exports.create = async (req, res) => {
     try {
         const { amount, category, description, date } = req.body;
         const userId = req.userId;
+        const io = req.app.get('io');
         if (!amount || !category) {
             return res.status(400).json({ message: 'Amount and category are required' });
         }
@@ -19,6 +20,11 @@ exports.create = async (req, res) => {
         res.status(201).json({
             message: 'Expense added successfully',
             expense
+        });
+
+        io.to(`user_${userId}`).emit('expense:changed', {
+            action: 'created',
+            expenseId: expense.id
         });
 
     } catch (error) {
@@ -79,6 +85,7 @@ exports.update = async (req, res) => {
         const { id } = req.params;
         const userId = req.userId;
         const { amount, category, description, date } = req.body;
+        const io = req.app.get('io');
 
         const expense = await Expense.findOne({
             where: { id, userId }
@@ -99,6 +106,11 @@ exports.update = async (req, res) => {
             expense
         });
 
+        io.to(`user_${userId}`).emit('expense:changed', {
+            action: 'updated',
+            expenseId: expense.id
+        });
+
     } catch (error) {
         console.error('Update expense error:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
@@ -108,6 +120,7 @@ exports.delete = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.userId;
+        const io = req.app.get('io');
 
         const expense = await Expense.findOne({
             where: { id, userId }
@@ -120,6 +133,11 @@ exports.delete = async (req, res) => {
         await expense.destroy();
 
         res.json({ message: 'Expense deleted successfully' });
+
+        io.to(`user_${userId}`).emit('expense:changed', {
+            action: 'deleted',
+            expenseId: Number(id)
+        });
 
     } catch (error) {
         console.error('Delete expense error:', error);
