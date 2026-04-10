@@ -139,7 +139,10 @@ async function loadDashboard() {
         if (statsResponse.ok) {
             let overallSpending = 0;
             if (expensesData.expenses && expensesData.expenses.length > 0) {
-                overallSpending = expensesData.expenses.reduce((sum, expense) => sum + parseFloat(expense.amount || 0), 0);
+                overallSpending = expensesData.expenses.reduce((sum, expense) => {
+                    const amount = parseFloat(expense.amount || 0);
+                    return amount > 0 ? sum + amount : sum;
+                }, 0);
             }
             updateStats(statsData, overallSpending);
             renderCategoryChart(statsData.categoryBreakdown);
@@ -358,12 +361,25 @@ function renderRecentExpenses(expenses) {
     `).join('');
 }
 function formatDate(dateString) {
-    const date = new Date(dateString);
+    const date = parseDateSafe(dateString);
     return date.toLocaleDateString('en-IN', { 
         day: 'numeric', 
         month: 'short', 
         year: 'numeric' 
     });
+}
+
+function parseDateSafe(value) {
+    if (value instanceof Date) return value;
+    const raw = String(value || '').trim();
+    const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+        const year = Number.parseInt(dateOnly[1], 10);
+        const month = Number.parseInt(dateOnly[2], 10);
+        const day = Number.parseInt(dateOnly[3], 10);
+        return new Date(year, month - 1, day);
+    }
+    return new Date(raw);
 }
 function getCategoryClass(category) {
     const classes = {

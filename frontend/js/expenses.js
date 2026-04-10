@@ -3,6 +3,7 @@
     loadUserInfo();
     initRealtimeExpenses();
     initializeCsvControls();
+    initializeBulkActions();
     initializeBankAccountControls();
     initializeRecurringControls();
     setupRecurringEditForm();
@@ -14,6 +15,7 @@
 let expensesSocket = null;
 let recurringRulesCache = [];
 let bankAccountsCache = [];
+let visibleExpensesCache = [];
 
 function getAuthToken() {
     return localStorage.getItem('token');
@@ -83,6 +85,13 @@ function initializeCsvControls() {
     }
 }
 
+function initializeBulkActions() {
+    const deleteAllVisibleBtn = document.getElementById('delete-all-visible-btn');
+    if (!deleteAllVisibleBtn) return;
+
+    deleteAllVisibleBtn.addEventListener('click', deleteAllVisibleExpenses);
+}
+
 function initializeBankAccountControls() {
     const form = document.getElementById('bank-account-form');
     if (!form) return;
@@ -139,14 +148,38 @@ async function loadBankAccounts() {
 
         if (!response.ok) {
             container.innerHTML = `<p class="text-sm text-red-500">${escapeHtml(data.message || 'Failed to load account numbers')}</p>`;
+            renderImportAccountSelector();
             return;
         }
 
         bankAccountsCache = data.accounts || [];
         renderBankAccounts();
+        renderImportAccountSelector();
     } catch (error) {
         console.error('Load bank accounts error:', error);
         container.innerHTML = '<p class="text-sm text-red-500">An error occurred while loading account numbers.</p>';
+        renderImportAccountSelector();
+    }
+}
+
+function renderImportAccountSelector() {
+    const selector = document.getElementById('import-account-select');
+    if (!selector) return;
+
+    const previousValue = selector.value;
+    const activeAccounts = bankAccountsCache.filter((account) => Boolean(account.isActive));
+
+    selector.innerHTML = '<option value="">Auto: Try all active accounts</option>';
+    activeAccounts.forEach((account) => {
+        const label = (account.label || 'No label').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const option = document.createElement('option');
+        option.value = String(account.id);
+        option.textContent = `${String(account.accountType || 'Bank').toUpperCase()} • ${label} • ****${account.accountNumberLast4}`;
+        selector.appendChild(option);
+    });
+
+    if (previousValue && activeAccounts.some((account) => String(account.id) === previousValue)) {
+        selector.value = previousValue;
     }
 }
 
@@ -342,7 +375,7 @@ function renderRecurringExpenses(recurringExpenses) {
         return `
             <div class="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                    <p class="font-semibold text-gray-800">${safeCategory} · ₹${parseFloat(item.amount).toFixed(2)}</p>
+                    <p class="font-semibold text-gray-800">${safeCategory} · ₹${formatCurrencyAmount(item.amount)}</p>
                     <p class="text-sm text-gray-600">${safeDescription}</p>
                     <p class="text-xs text-gray-500 mt-1">${safeFrequency} · Next run: ${safeNextRunDate}</p>
                 </div>
@@ -586,6 +619,10 @@ async function importSelectedFile(file) {
     try {
         const formData = new FormData();
         formData.append('file', file);
+        const selectedAccountId = document.getElementById('import-account-select')?.value;
+        if (selectedAccountId) {
+            formData.append('selectedAccountId', selectedAccountId);
+        }
 
         const response = await fetch(API.expenses.import, {
             method: 'POST',
@@ -597,8 +634,12 @@ async function importSelectedFile(file) {
 
         const data = await response.json();
         if (!response.ok) {
-            const errorMessage = data.message === 'Server error' && data.error ? data.error : data.message;
-            alert(errorMessage || 'Failed to import file');
+            if (data && data.error) {
+                console.error('Import API error detail:', data.error);
+            }
+
+            const errorMessage = data.message || 'Failed to import file';
+            alert(errorMessage);
             return;
         }
 
@@ -663,17 +704,27 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function formatCurrencyAmount(value) {
+    const numeric = Number.parseFloat(value);
+    if (Number.isNaN(numeric)) return '0.00';
+    return Math.abs(numeric).toFixed(2);
+}
+
 function renderExpenses(expenses) {
     const tbody = document.getElementById('expenses-list');
     const noExpenses = document.getElementById('no-expenses');
+    const deleteAllVisibleBtn = document.getElementById('delete-all-visible-btn');
+    visibleExpensesCache = expenses;
 
     if (expenses.length === 0) {
         tbody.innerHTML = '';
         noExpenses.classList.remove('hidden');
+        if (deleteAllVisibleBtn) deleteAllVisibleBtn.disabled = true;
         return;
     }
 
     noExpenses.classList.add('hidden');
+    if (deleteAllVisibleBtn) deleteAllVisibleBtn.disabled = false;
 
     tbody.innerHTML = expenses.map((expense) => {
         const category = expense.category || 'Other';
@@ -694,7 +745,7 @@ function renderExpenses(expenses) {
             </td>
             <td class="px-6 py-4 text-gray-600">${safeDescription}</td>
             <td class="px-6 py-4 text-right">
-                <span class="text-gray-800 font-bold">₹${parseFloat(expense.amount).toFixed(2)}</span>
+                <span class="text-gray-800 font-bold">₹${formatCurrencyAmount(expense.amount)}</span>
             </td>
             <td class="px-6 py-4 text-center">
                 <button onclick="openEditModal(${expense.id})" class="text-purple-600 hover:text-purple-800 mr-4 transition">
@@ -707,6 +758,46 @@ function renderExpenses(expenses) {
         </tr>
     `;
     }).join('');
+}
+
+async function deleteAllVisibleExpenses() {
+    if (!Array.isArray(visibleExpensesCache) || visibleExpensesCache.length === 0) {
+        alert('No visible expenses to delete.');
+        return;
+    }
+
+    if (!confirm(`Delete all ${visibleExpensesCache.length} visible expenses? This action cannot be undone.`)) {
+        return;
+    }
+
+    const deleteAllVisibleBtn = document.getElementById('delete-all-visible-btn');
+    if (deleteAllVisibleBtn) deleteAllVisibleBtn.disabled = true;
+
+    try {
+        const ids = visibleExpensesCache.map((expense) => expense.id);
+        const response = await fetch(`${API.expenses.base}/bulk-delete`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                ids,
+                clearImportHistory: true
+            })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to delete visible expenses.');
+            return;
+        }
+
+        await loadExpenses(getActiveFilters());
+        alert(`Deleted ${data.deletedCount} expenses from database.`);
+    } catch (error) {
+        console.error('Delete all visible expenses error:', error);
+        alert('An error occurred while deleting visible expenses.');
+    } finally {
+        if (deleteAllVisibleBtn) deleteAllVisibleBtn.disabled = false;
+    }
 }
 
 function applyFilters() {
@@ -750,34 +841,37 @@ function closeEditModal() {
     document.getElementById('edit-modal').classList.add('hidden');
 }
 
-document.getElementById('edit-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
+const editForm = document.getElementById('edit-form');
+if (editForm) {
+    editForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
 
-    const id = document.getElementById('edit-id').value;
-    const amount = document.getElementById('edit-amount').value;
-    const category = document.getElementById('edit-category').value;
-    const description = document.getElementById('edit-description').value;
-    const date = document.getElementById('edit-date').value;
+        const id = document.getElementById('edit-id').value;
+        const amount = document.getElementById('edit-amount').value;
+        const category = document.getElementById('edit-category').value;
+        const description = document.getElementById('edit-description').value;
+        const date = document.getElementById('edit-date').value;
 
-    try {
-        const response = await fetch(`${API.expenses.base}/${id}`, {
-            method: 'PUT',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ amount, category, description, date })
-        });
+        try {
+            const response = await fetch(`${API.expenses.base}/${id}`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ amount, category, description, date })
+            });
 
-        if (response.ok) {
-            closeEditModal();
-            loadExpenses();
-        } else {
-            const data = await response.json();
-            alert(data.message || 'Failed to update expense');
+            if (response.ok) {
+                closeEditModal();
+                loadExpenses();
+            } else {
+                const data = await response.json();
+                alert(data.message || 'Failed to update expense');
+            }
+        } catch (error) {
+            console.error('Update expense error:', error);
+            alert('An error occurred. Please try again.');
         }
-    } catch (error) {
-        console.error('Update expense error:', error);
-        alert('An error occurred. Please try again.');
-    }
-});
+    });
+}
 
 async function deleteExpense(id) {
     if (!confirm('Are you sure you want to delete this expense?')) {
@@ -803,7 +897,7 @@ async function deleteExpense(id) {
 }
 
 function formatDate(dateString) {
-    const date = new Date(dateString);
+    const date = parseDateSafe(dateString);
     if (Number.isNaN(date.getTime())) {
         return '-';
     }
@@ -816,12 +910,25 @@ function formatDate(dateString) {
 
 function toDateInputValue(dateString) {
     if (!dateString) return '';
-    const date = new Date(dateString);
+    const date = parseDateSafe(dateString);
     if (Number.isNaN(date.getTime())) return '';
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+}
+
+function parseDateSafe(value) {
+    if (value instanceof Date) return value;
+    const raw = String(value || '').trim();
+    const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+        const year = Number.parseInt(dateOnly[1], 10);
+        const month = Number.parseInt(dateOnly[2], 10);
+        const day = Number.parseInt(dateOnly[3], 10);
+        return new Date(year, month - 1, day);
+    }
+    return new Date(raw);
 }
 
 function getCategoryClass(category) {

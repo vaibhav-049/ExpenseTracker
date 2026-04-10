@@ -27,6 +27,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+function parseDateSafe(value) {
+    if (value instanceof Date) return value;
+    const raw = String(value || '').trim();
+    const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+        const year = Number.parseInt(dateOnly[1], 10);
+        const month = Number.parseInt(dateOnly[2], 10);
+        const day = Number.parseInt(dateOnly[3], 10);
+        return new Date(year, month - 1, day);
+    }
+    return new Date(raw);
+}
+
 function openMonthModal() {
     console.log('Opening month modal');
     const modal = document.getElementById('month-modal');
@@ -55,14 +68,19 @@ function openMonthModal() {
         
         if (data.expenses && Array.isArray(data.expenses) && data.expenses.length > 0) {
             data.expenses.forEach(expense => {
-                const date = new Date(expense.date);
+                const amount = parseFloat(expense.amount || 0);
+                if (!(amount > 0)) {
+                    return;
+                }
+
+                const date = parseDateSafe(expense.date);
                 const monthKey = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
                 const monthLabel = date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
                 
                 if (!monthsData[monthKey]) {
                     monthsData[monthKey] = { label: monthLabel, total: 0 };
                 }
-                monthsData[monthKey].total += parseFloat(expense.amount || 0);
+                monthsData[monthKey].total += amount;
             });
         }
         
@@ -145,7 +163,7 @@ async function exportToPDF(selectedMonth) {
         });
         const expensesData = await expensesResponse.json();
         
-        let filteredExpenses = expensesData.expenses || [];
+        let filteredExpenses = (expensesData.expenses || []).filter((expense) => parseFloat(expense.amount || 0) > 0);
         let monthLabel = selectedMonth;
         let totalSpending = 0;
         let categoryBreakdown = {};
@@ -153,7 +171,7 @@ async function exportToPDF(selectedMonth) {
         if (selectedMonth) {
             const [year, month] = selectedMonth.split('-');
             filteredExpenses = filteredExpenses.filter(expense => {
-                const expenseDate = new Date(expense.date);
+                const expenseDate = parseDateSafe(expense.date);
                 return expenseDate.getFullYear() === parseInt(year) && 
                        (expenseDate.getMonth() + 1) === parseInt(month);
             });
@@ -274,7 +292,7 @@ async function exportToPDF(selectedMonth) {
                 doc.rect(14, yPos, 182, 10, 'F');
             }
             
-            const date = new Date(expense.date).toLocaleDateString('en-IN', { 
+            const date = parseDateSafe(expense.date).toLocaleDateString('en-IN', { 
                 day: '2-digit', month: 'short', year: 'numeric' 
             });
             doc.setFontSize(10);

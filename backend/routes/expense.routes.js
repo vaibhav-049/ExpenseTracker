@@ -11,6 +11,7 @@ router.get('/stats', expenseController.getStats);
 router.get('/anomalies', expenseController.getAnomalies);
 router.get('/export', expenseController.exportCsv);
 router.post('/import', upload.single('file'), expenseController.importCsv);
+router.post('/bulk-delete', expenseController.deleteBulk);
 router.get('/recurring', expenseController.getRecurring);
 router.post('/recurring', expenseController.createRecurring);
 router.put('/recurring/:id', expenseController.updateRecurring);
