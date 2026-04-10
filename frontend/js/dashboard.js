@@ -33,9 +33,17 @@ function initRealtimeDashboard() {
     });
 
     dashboardSocket.on('budget:alert', (payload) => {
-        if (payload) {
-            showBudgetAlert(payload.level, payload.monthlySpending, payload.budget);
+        if (!payload) return;
+
+        const spending = Number(payload.monthlySpending);
+        const budget = Number(payload.budget);
+
+        if (!Number.isFinite(spending) || !Number.isFinite(budget)) {
+            console.warn('Invalid budget alert payload received:', payload);
+            return;
         }
+
+        showBudgetAlert(payload.level, spending, budget);
     });
 }
 
@@ -64,6 +72,12 @@ async function loadBudget() {
 
 async function saveBudget() {
     const budgetInput = document.getElementById('monthly-budget-input');
+    if (!budgetInput) {
+        console.error('Budget input element not found');
+        alert('Budget input is not available right now. Please refresh and try again.');
+        return;
+    }
+
     const budgetValue = parseFloat(budgetInput.value);
 
     if (Number.isNaN(budgetValue) || budgetValue < 0) {

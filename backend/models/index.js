@@ -13,7 +13,10 @@ db.Sequelize = Sequelize;
 db.sequelize = sequelize;
 db.User = require('./user.model')(sequelize, Sequelize);
 db.Expense = require('./expense.model')(sequelize, Sequelize);
+db.RecurringExpense = require('./recurring-expense.model')(sequelize, Sequelize);
 db.User.hasMany(db.Expense, { foreignKey: 'userId', as: 'expenses' });
 db.Expense.belongsTo(db.User, { foreignKey: 'userId', as: 'user' });
+db.User.hasMany(db.RecurringExpense, { foreignKey: 'userId', as: 'recurringExpenses' });
+db.RecurringExpense.belongsTo(db.User, { foreignKey: 'userId', as: 'user' });
 
 module.exports = db;

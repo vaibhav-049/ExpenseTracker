@@ -157,12 +157,16 @@ exports.updateBudget = async (req, res) => {
 
         const monthlySpending = monthlyExpenses.reduce((sum, exp) => sum + parseFloat(exp.amount || 0), 0);
 
-        io.to(`user_${req.userId}`).emit('budget:changed', {
-            budget: parsedBudget,
-            monthlySpending
-        });
+        if (io) {
+            io.to(`user_${req.userId}`).emit('budget:changed', {
+                budget: parsedBudget,
+                monthlySpending
+            });
+        } else {
+            console.warn('Socket.io instance not available while emitting budget:changed');
+        }
 
-        if (parsedBudget > 0 && monthlySpending >= parsedBudget * 0.8) {
+        if (io && parsedBudget > 0 && monthlySpending >= parsedBudget * 0.8) {
             io.to(`user_${req.userId}`).emit('budget:alert', {
                 monthlySpending,
                 budget: parsedBudget,

@@ -4,7 +4,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('date').value = today;
     setupCategorySelection();
+    setupRecurringControls();
 });
+
+function setupRecurringControls() {
+    const recurringCheckbox = document.getElementById('is-recurring');
+    const recurringOptions = document.getElementById('recurring-options');
+
+    if (!recurringCheckbox || !recurringOptions) return;
+
+    recurringCheckbox.addEventListener('change', () => {
+        recurringOptions.classList.toggle('hidden', !recurringCheckbox.checked);
+    });
+}
 function setupCategorySelection() {
     const categoryCards = document.querySelectorAll('.category-card');
     const categoryInput = document.getElementById('category');
@@ -33,6 +45,9 @@ document.getElementById('add-expense-form').addEventListener('submit', async (e)
     const category = document.getElementById('category').value;
     const description = document.getElementById('description').value;
     const date = document.getElementById('date').value;
+    const isRecurring = document.getElementById('is-recurring')?.checked;
+    const recurringFrequency = document.getElementById('recurring-frequency')?.value;
+    const recurringEndDate = document.getElementById('recurring-end-date')?.value;
     if (!category) {
         showMessage('Please select a category', true);
         return;
@@ -48,12 +63,35 @@ document.getElementById('add-expense-form').addEventListener('submit', async (e)
         const data = await response.json();
 
         if (response.ok) {
+            if (isRecurring) {
+                const recurringResponse = await fetch(API.expenses.recurring, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        amount,
+                        category,
+                        description,
+                        frequency: recurringFrequency || 'monthly',
+                        startDate: date,
+                        endDate: recurringEndDate || null
+                    })
+                });
+
+                if (!recurringResponse.ok) {
+                    const recurringData = await recurringResponse.json();
+                    showMessage(`Expense added, but recurring setup failed: ${recurringData.message || 'Unknown error'}`, true);
+                    return;
+                }
+            }
+
             showMessage('🎉 Expense added successfully!');
             document.getElementById('add-expense-form').reset();
             document.querySelectorAll('.category-card').forEach(c => c.classList.remove('selected'));
             document.getElementById('category').value = '';
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('date').value = today;
+            const recurringOptions = document.getElementById('recurring-options');
+            if (recurringOptions) recurringOptions.classList.add('hidden');
             setTimeout(() => {
                 window.location.href = 'expenses.html';
             }, 1500);
