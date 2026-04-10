@@ -37,6 +37,7 @@ function initRealtimeExpenses() {
 function initializeCsvControls() {
     const exportBtn = document.getElementById('export-csv-btn');
     const importInput = document.getElementById('import-csv-input');
+    const dropZone = document.getElementById('import-drop-zone');
 
     if (exportBtn) {
         exportBtn.addEventListener('click', exportExpensesCsv);
@@ -44,6 +45,41 @@ function initializeCsvControls() {
 
     if (importInput) {
         importInput.addEventListener('change', handleCsvImport);
+    }
+
+    if (dropZone && importInput) {
+        dropZone.addEventListener('click', () => {
+            importInput.click();
+        });
+
+        ['dragenter', 'dragover'].forEach((eventName) => {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropZone.classList.add('border-indigo-500', 'bg-indigo-50');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach((eventName) => {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+            });
+        });
+
+        dropZone.addEventListener('drop', async (event) => {
+            const file = event.dataTransfer?.files?.[0];
+            if (!file) return;
+
+            const lowerName = String(file.name || '').toLowerCase();
+            if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.zip')) {
+                alert('Please drop a .csv or .zip file only.');
+                return;
+            }
+
+            await importSelectedFile(file);
+        });
     }
 }
 
@@ -540,6 +576,13 @@ async function handleCsvImport(event) {
     const file = event.target.files[0];
     if (!file) return;
 
+    await importSelectedFile(file);
+    event.target.value = '';
+}
+
+async function importSelectedFile(file) {
+    if (!file) return;
+
     try {
         const formData = new FormData();
         formData.append('file', file);
@@ -570,8 +613,6 @@ async function handleCsvImport(event) {
     } catch (error) {
         console.error('Import CSV error:', error);
         alert(error.message || 'An error occurred while importing CSV.');
-    } finally {
-        event.target.value = '';
     }
 }
 
