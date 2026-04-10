@@ -8,6 +8,7 @@ const { promisify } = require('util');
 const StreamZip = require('node-stream-zip');
 const XLSX = require('xlsx');
 const execFileAsync = promisify(execFile);
+const User = db.User;
 const Expense = db.Expense;
 const RecurringExpense = db.RecurringExpense;
 const BankAccount = db.BankAccount;
@@ -527,6 +528,186 @@ function parseImportDate(value) {
     }
 
     return null;
+}
+
+function clampScore(value, min = 0, max = 100) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function toNumber(value) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function startOfDay(dateValue) {
+    const date = new Date(dateValue);
+    date.setHours(0, 0, 0, 0);
+    return date;
+}
+
+function getBudgetAdherenceScore(monthlySpending, monthlyBudget) {
+    if (!(monthlyBudget > 0)) {
+        return {
+            score: 65,
+            usageRatio: null
+        };
+    }
+
+    const usageRatio = monthlySpending / monthlyBudget;
+    if (usageRatio <= 0.6) return { score: 100, usageRatio };
+    if (usageRatio <= 0.8) return { score: 90, usageRatio };
+    if (usageRatio <= 1) return { score: 75, usageRatio };
+    if (usageRatio <= 1.2) return { score: 55, usageRatio };
+    return { score: 35, usageRatio };
+}
+
+function getWeeklyConsistencyScore(expenses) {
+    const weekTotals = [];
+    const today = startOfDay(new Date());
+
+    for (let week = 0; week < 8; week += 1) {
+        const weekEnd = new Date(today);
+        weekEnd.setDate(weekEnd.getDate() - (7 * week));
+        const weekStart = new Date(weekEnd);
+        weekStart.setDate(weekStart.getDate() - 6);
+
+        const total = expenses.reduce((sum, expense) => {
+            const expenseDate = startOfDay(expense.date);
+            if (expenseDate >= weekStart && expenseDate <= weekEnd) {
+                return sum + toNumber(expense.amount);
+            }
+            return sum;
+        }, 0);
+
+        weekTotals.push(total);
+    }
+
+    const mean = weekTotals.reduce((sum, value) => sum + value, 0) / weekTotals.length;
+    if (mean === 0) {
+        return {
+            score: 70,
+            weekTotals
+        };
+    }
+
+    const variance = weekTotals.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / weekTotals.length;
+    const stdDev = Math.sqrt(variance);
+    const coefficientOfVariation = stdDev / mean;
+    const score = clampScore(Math.round(100 - (coefficientOfVariation * 120)), 35, 100);
+
+    return {
+        score,
+        weekTotals
+    };
+}
+
+function getEssentialSpendScore(expenses) {
+    const essentialCategories = new Set(['Food', 'Bills', 'Health', 'Education']);
+    const totals = expenses.reduce((acc, expense) => {
+        const amount = toNumber(expense.amount);
+        acc.total += amount;
+        if (essentialCategories.has(expense.category)) {
+            acc.essential += amount;
+        }
+        return acc;
+    }, { essential: 0, total: 0 });
+
+    const ratio = totals.total > 0 ? (totals.essential / totals.total) : 0;
+    if (totals.total === 0) {
+        return {
+            score: 70,
+            ratio
+        };
+    }
+
+    if (ratio >= 0.45 && ratio <= 0.75) return { score: 92, ratio };
+    if (ratio >= 0.35 && ratio < 0.45) return { score: 80, ratio };
+    if (ratio > 0.75 && ratio <= 0.88) return { score: 76, ratio };
+    if (ratio >= 0.25 && ratio < 0.35) return { score: 64, ratio };
+    return { score: 52, ratio };
+}
+
+function getMonthOverMonthScore(expenses) {
+    const today = startOfDay(new Date());
+    const currentStart = new Date(today);
+    currentStart.setDate(currentStart.getDate() - 29);
+    const previousEnd = new Date(currentStart);
+    previousEnd.setDate(previousEnd.getDate() - 1);
+    const previousStart = new Date(previousEnd);
+    previousStart.setDate(previousStart.getDate() - 29);
+
+    let current = 0;
+    let previous = 0;
+
+    expenses.forEach((expense) => {
+        const date = startOfDay(expense.date);
+        const amount = toNumber(expense.amount);
+        if (date >= currentStart && date <= today) {
+            current += amount;
+            return;
+        }
+
+        if (date >= previousStart && date <= previousEnd) {
+            previous += amount;
+        }
+    });
+
+    if (previous === 0) {
+        return {
+            score: 70,
+            changeRatio: 0,
+            current,
+            previous
+        };
+    }
+
+    const changeRatio = (current - previous) / previous;
+    if (changeRatio <= -0.15) return { score: 100, changeRatio, current, previous };
+    if (changeRatio <= -0.05) return { score: 85, changeRatio, current, previous };
+    if (changeRatio <= 0.05) return { score: 70, changeRatio, current, previous };
+    if (changeRatio <= 0.15) return { score: 55, changeRatio, current, previous };
+    return { score: 40, changeRatio, current, previous };
+}
+
+function getHealthGrade(score) {
+    if (score >= 85) return 'A';
+    if (score >= 70) return 'B';
+    if (score >= 55) return 'C';
+    return 'D';
+}
+
+function buildCoachTips(context) {
+    const tips = [];
+
+    if (!(context.monthlyBudget > 0)) {
+        tips.push('Set a monthly budget to unlock stronger coaching and better score stability.');
+    } else if (context.budgetUsageRatio > 1) {
+        tips.push(`You are at ${(context.budgetUsageRatio * 100).toFixed(0)}% of budget. Trim flexible categories this week.`);
+    } else if (context.budgetUsageRatio >= 0.8) {
+        tips.push('Budget usage is above 80%. Keep non-essential spending minimal for the rest of the month.');
+    }
+
+    if (context.momChangeRatio > 0.1) {
+        tips.push(`Spending is ${(context.momChangeRatio * 100).toFixed(1)}% higher than last month. Review high-growth categories.`);
+    } else if (context.momChangeRatio < -0.08) {
+        tips.push('Great improvement versus last month. Keep this trend consistent for two more weeks.');
+    }
+
+    if (context.essentialRatio < 0.35) {
+        tips.push('Essential spending ratio is low. Watch impulse purchases in discretionary categories.');
+    } else if (context.essentialRatio > 0.82) {
+        tips.push('Most spending is essential. Explore bill optimization to improve score further.');
+    }
+
+    if (context.weeklyChangeRatio > 0.15) {
+        tips.push('This week spend is sharply above last week. Set a small weekly cap to avoid drift.');
+    }
+
+    if (tips.length === 0) {
+        tips.push('Healthy pattern detected. Continue tracking regularly and keep weekly variance low.');
+    }
+
+    return tips.slice(0, 3);
 }
 
 function sha256Hex(payload) {
@@ -1518,6 +1699,96 @@ exports.getAnomalies = async (req, res) => {
         });
     } catch (error) {
         console.error('Get anomalies error:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+exports.getFinancialHealth = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const io = req.app.get('io');
+        await processDueRecurringExpensesForUser(userId, io);
+
+        const user = await User.findByPk(userId, { attributes: ['budget'] });
+        const monthlyBudget = toNumber(user?.budget);
+
+        const lookbackStart = startOfDay(new Date());
+        lookbackStart.setDate(lookbackStart.getDate() - 119);
+
+        const expenses = await Expense.findAll({
+            where: {
+                userId,
+                amount: { [Op.gt]: 0 },
+                date: { [Op.gte]: toDateOnlyString(lookbackStart) }
+            },
+            attributes: ['date', 'amount', 'category']
+        });
+
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthSpend = expenses.reduce((sum, expense) => {
+            const expenseDate = startOfDay(expense.date);
+            if (expenseDate >= startOfMonth) {
+                return sum + toNumber(expense.amount);
+            }
+            return sum;
+        }, 0);
+
+        const budgetResult = getBudgetAdherenceScore(monthSpend, monthlyBudget);
+        const consistencyResult = getWeeklyConsistencyScore(expenses);
+        const essentialResult = getEssentialSpendScore(expenses);
+        const improvementResult = getMonthOverMonthScore(expenses);
+
+        const weightedScore = (
+            (budgetResult.score * 0.35)
+            + (consistencyResult.score * 0.25)
+            + (essentialResult.score * 0.2)
+            + (improvementResult.score * 0.2)
+        );
+
+        const score = Math.round(clampScore(weightedScore));
+        const grade = getHealthGrade(score);
+
+        const weekTotals = consistencyResult.weekTotals;
+        const thisWeek = weekTotals[0] || 0;
+        const lastWeek = weekTotals[1] || 0;
+        const weeklyChangeRatio = lastWeek > 0 ? ((thisWeek - lastWeek) / lastWeek) : 0;
+
+        const coachTips = buildCoachTips({
+            monthlyBudget,
+            budgetUsageRatio: budgetResult.usageRatio || 0,
+            momChangeRatio: improvementResult.changeRatio,
+            essentialRatio: essentialResult.ratio,
+            weeklyChangeRatio
+        });
+
+        const summary = score >= 85
+            ? 'Excellent financial rhythm with strong control and consistency.'
+            : score >= 70
+                ? 'Good overall stability. Small weekly optimizations can boost your score quickly.'
+                : score >= 55
+                    ? 'Average health right now. Focus on budget discipline and category control.'
+                    : 'Spending pattern is volatile. Tighten weekly limits and track essentials closely.';
+
+        res.json({
+            score,
+            grade,
+            summary,
+            factors: {
+                budgetAdherence: budgetResult.score,
+                consistency: consistencyResult.score,
+                essentialBalance: essentialResult.score,
+                monthOverMonth: improvementResult.score
+            },
+            coachTips,
+            weekly: {
+                thisWeek: Number(thisWeek.toFixed(2)),
+                lastWeek: Number(lastWeek.toFixed(2)),
+                changePercent: Number((weeklyChangeRatio * 100).toFixed(1))
+            }
+        });
+    } catch (error) {
+        console.error('Get financial health error:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };

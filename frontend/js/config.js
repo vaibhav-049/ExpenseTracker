@@ -19,6 +19,7 @@ const API = {
     expenses: {
         base: `${API_BASE_URL}/expenses`,
         stats: `${API_BASE_URL}/expenses/stats`,
+        financialHealth: `${API_BASE_URL}/expenses/financial-health`,
         anomalies: `${API_BASE_URL}/expenses/anomalies`,
         import: `${API_BASE_URL}/expenses/import`,
         recurring: `${API_BASE_URL}/expenses/recurring`,

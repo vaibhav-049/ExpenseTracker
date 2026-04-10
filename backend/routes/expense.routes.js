@@ -8,6 +8,7 @@ router.use(authMiddleware);
 router.post('/', expenseController.create);
 router.get('/', expenseController.getAll);
 router.get('/stats', expenseController.getStats);
+router.get('/financial-health', expenseController.getFinancialHealth);
 router.get('/anomalies', expenseController.getAnomalies);
 router.get('/export', expenseController.exportCsv);
 router.post('/import', upload.single('file'), expenseController.importCsv);

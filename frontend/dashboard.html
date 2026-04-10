@@ -136,6 +136,53 @@
                 </div>
             </div>
 
+            <div class="bg-white rounded-2xl shadow-sm p-6 mb-8 fade-in">
+                <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+                    <div class="lg:w-1/3">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-lg font-bold text-gray-800">Financial Health Score</h3>
+                            <span id="health-grade" class="px-3 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">-</span>
+                        </div>
+                        <p id="health-summary" class="text-sm text-gray-600 mb-4">Calculating your score...</p>
+                        <div class="flex items-end gap-2">
+                            <p id="health-score" class="text-5xl font-extrabold text-indigo-700">0</p>
+                            <p class="text-sm text-gray-500 mb-2">/100</p>
+                        </div>
+                        <div class="w-full h-3 bg-gray-100 rounded-full mt-4 overflow-hidden">
+                            <div id="health-score-bar" class="h-3 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full" style="width: 0%"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 mt-5 text-sm">
+                            <div class="bg-indigo-50 rounded-xl px-3 py-2">
+                                <p class="text-gray-500 text-xs">Budget</p>
+                                <p id="factor-budget" class="font-bold text-indigo-700">-</p>
+                            </div>
+                            <div class="bg-blue-50 rounded-xl px-3 py-2">
+                                <p class="text-gray-500 text-xs">Consistency</p>
+                                <p id="factor-consistency" class="font-bold text-blue-700">-</p>
+                            </div>
+                            <div class="bg-emerald-50 rounded-xl px-3 py-2">
+                                <p class="text-gray-500 text-xs">Essentials</p>
+                                <p id="factor-essential" class="font-bold text-emerald-700">-</p>
+                            </div>
+                            <div class="bg-amber-50 rounded-xl px-3 py-2">
+                                <p class="text-gray-500 text-xs">Monthly Trend</p>
+                                <p id="factor-trend" class="font-bold text-amber-700">-</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="lg:w-2/3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-base font-bold text-gray-800">Weekly Coach</h4>
+                            <span id="weekly-delta" class="text-xs font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600">-</span>
+                        </div>
+                        <div id="coach-tips" class="space-y-3">
+                            <p class="text-sm text-gray-500">Preparing personalized tips...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Stats Cards -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <!-- Total Spending (All Time) -->

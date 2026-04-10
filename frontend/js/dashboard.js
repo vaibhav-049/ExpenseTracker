@@ -121,20 +121,17 @@ function updateBudgetDisplay() {
 
 async function loadDashboard() {
     try {
-        const statsResponse = await fetch(API.expenses.stats, {
-            headers: getAuthHeaders()
-        });
+        const [statsResponse, expensesResponse, anomaliesResponse, healthResponse] = await Promise.all([
+            fetch(API.expenses.stats, { headers: getAuthHeaders() }),
+            fetch(API.expenses.base, { headers: getAuthHeaders() }),
+            fetch(API.expenses.anomalies, { headers: getAuthHeaders() }),
+            fetch(API.expenses.financialHealth, { headers: getAuthHeaders() })
+        ]);
+
         const statsData = await statsResponse.json();
-
-        const expensesResponse = await fetch(API.expenses.base, {
-            headers: getAuthHeaders()
-        });
         const expensesData = await expensesResponse.json();
-
-        const anomaliesResponse = await fetch(API.expenses.anomalies, {
-            headers: getAuthHeaders()
-        });
         const anomaliesData = await anomaliesResponse.json();
+        const healthData = await healthResponse.json();
 
         if (statsResponse.ok) {
             let overallSpending = 0;
@@ -155,6 +152,10 @@ async function loadDashboard() {
 
         if (anomaliesResponse.ok) {
             renderAnomalies(anomaliesData);
+        }
+
+        if (healthResponse.ok) {
+            renderFinancialHealth(healthData);
         }
 
     } catch (error) {
@@ -197,6 +198,72 @@ function renderAnomalies(data) {
         `;
     }).join('');
 }
+
+function renderFinancialHealth(payload) {
+    const score = Number(payload?.score || 0);
+    const grade = escapeHtml(payload?.grade || '-');
+    const summary = escapeHtml(payload?.summary || 'Insights are not available yet.');
+    const tips = Array.isArray(payload?.coachTips) ? payload.coachTips : [];
+    const factors = payload?.factors || {};
+    const weekly = payload?.weekly || {};
+
+    const scoreEl = document.getElementById('health-score');
+    const gradeEl = document.getElementById('health-grade');
+    const summaryEl = document.getElementById('health-summary');
+    const scoreBarEl = document.getElementById('health-score-bar');
+    const tipsEl = document.getElementById('coach-tips');
+    const weeklyDeltaEl = document.getElementById('weekly-delta');
+
+    if (scoreEl) scoreEl.textContent = String(Math.round(score));
+    if (gradeEl) {
+        gradeEl.textContent = grade;
+        gradeEl.className = `px-3 py-1 rounded-full text-xs font-bold ${getGradeBadgeClass(grade)}`;
+    }
+    if (summaryEl) summaryEl.textContent = summary;
+    if (scoreBarEl) scoreBarEl.style.width = `${Math.max(0, Math.min(100, score))}%`;
+
+    const factorBudgetEl = document.getElementById('factor-budget');
+    const factorConsistencyEl = document.getElementById('factor-consistency');
+    const factorEssentialEl = document.getElementById('factor-essential');
+    const factorTrendEl = document.getElementById('factor-trend');
+
+    if (factorBudgetEl) factorBudgetEl.textContent = `${Math.round(Number(factors.budgetAdherence || 0))}/100`;
+    if (factorConsistencyEl) factorConsistencyEl.textContent = `${Math.round(Number(factors.consistency || 0))}/100`;
+    if (factorEssentialEl) factorEssentialEl.textContent = `${Math.round(Number(factors.essentialBalance || 0))}/100`;
+    if (factorTrendEl) factorTrendEl.textContent = `${Math.round(Number(factors.monthOverMonth || 0))}/100`;
+
+    if (weeklyDeltaEl) {
+        const changePercent = Number(weekly.changePercent || 0);
+        const weeklyText = Number.isFinite(changePercent)
+            ? `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(1)}% vs last week`
+            : 'No weekly trend yet';
+        weeklyDeltaEl.textContent = weeklyText;
+        weeklyDeltaEl.className = `text-xs font-semibold px-2 py-1 rounded-full ${changePercent <= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`;
+    }
+
+    if (tipsEl) {
+        if (tips.length === 0) {
+            tipsEl.innerHTML = '<p class="text-sm text-gray-500">No coach tips right now.</p>';
+        } else {
+            tipsEl.innerHTML = tips.map((tip, index) => {
+                const safeTip = escapeHtml(tip);
+                return `
+                    <div class="border border-gray-100 rounded-xl px-4 py-3 bg-gray-50/70">
+                        <p class="text-sm text-gray-700"><span class="font-semibold text-indigo-700 mr-2">Tip ${index + 1}:</span>${safeTip}</p>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
+}
+
+function getGradeBadgeClass(grade) {
+    if (grade === 'A') return 'bg-emerald-100 text-emerald-700';
+    if (grade === 'B') return 'bg-indigo-100 text-indigo-700';
+    if (grade === 'C') return 'bg-amber-100 text-amber-700';
+    return 'bg-red-100 text-red-700';
+}
+
 function updateStats(stats, overallSpending) {
     document.getElementById('overall-spending').textContent = '₹' + overallSpending.toFixed(2);
     document.getElementById('total-spending').textContent = '₹' + stats.totalSpending.toFixed(2);
