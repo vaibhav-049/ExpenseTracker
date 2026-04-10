@@ -73,8 +73,8 @@ function initializeCsvControls() {
             if (!file) return;
 
             const lowerName = String(file.name || '').toLowerCase();
-            if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.zip')) {
-                alert('Please drop a .csv or .zip file only.');
+            if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.zip') && !lowerName.endsWith('.xls') && !lowerName.endsWith('.xlsx')) {
+                alert('Please drop a .csv, .zip, .xls, or .xlsx file only.');
                 return;
             }
 

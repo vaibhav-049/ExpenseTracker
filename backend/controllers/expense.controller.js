@@ -4,6 +4,7 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const StreamZip = require('node-stream-zip');
+const XLSX = require('xlsx');
 const Expense = db.Expense;
 const RecurringExpense = db.RecurringExpense;
 const BankAccount = db.BankAccount;
@@ -68,19 +69,25 @@ function parseCsvLine(line) {
     return fields.map((value) => value.replace(/^"|"$/g, '').replace(/""/g, '"'));
 }
 
+function normalizeImportHeader(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function findImportColumnIndex(headers, aliases) {
+    return headers.findIndex((header) => aliases.includes(header));
+}
+
 function parseCsvText(csvText) {
     const lines = String(csvText || '').split(/\r?\n/).filter((line) => line.trim().length > 0);
     if (lines.length < 2) {
         return [];
     }
 
-    const normalizeHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const headers = parseCsvLine(lines[0]).map((h) => normalizeHeader(h));
-    const findIndex = (aliases) => headers.findIndex((header) => aliases.includes(header));
+    const headers = parseCsvLine(lines[0]).map((h) => normalizeImportHeader(h));
 
-    const dateIndex = findIndex(['date', 'transactiondate', 'txndate', 'valuedate', 'postingdate']);
-    const debitIndex = findIndex(['debit', 'dr', 'debitamount', 'dramount', 'withdrawal', 'withdrawalamount']);
-    const creditIndex = findIndex(['credit', 'cr', 'creditamount', 'cramount', 'deposit', 'depositamount']);
+    const dateIndex = findImportColumnIndex(headers, ['date', 'transactiondate', 'txndate', 'valuedate', 'postingdate']);
+    const debitIndex = findImportColumnIndex(headers, ['debit', 'dr', 'debitamount', 'dramount', 'withdrawal', 'withdrawalamount']);
+    const creditIndex = findImportColumnIndex(headers, ['credit', 'cr', 'creditamount', 'cramount', 'deposit', 'depositamount']);
 
     if (dateIndex === -1 || (debitIndex === -1 && creditIndex === -1)) {
         throw new Error('CSV must contain date and debit/dr or credit/cr columns');
@@ -105,6 +112,59 @@ function parseCsvText(csvText) {
 
             return {
                 date: cols[dateIndex],
+                debitAmount: readColumn(debitIndex),
+                creditAmount: readColumn(creditIndex)
+            };
+        })
+        .filter((expense) => expense !== null);
+}
+
+function toDateFromSpreadsheetCell(cellValue) {
+    if (cellValue === null || cellValue === undefined || cellValue === '') return null;
+
+    if (typeof cellValue === 'number') {
+        const dateCode = XLSX.SSF.parse_date_code(cellValue);
+        if (!dateCode) return null;
+        const date = new Date(Date.UTC(dateCode.y, dateCode.m - 1, dateCode.d));
+        return Number.isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
+    }
+
+    const parsed = new Date(cellValue);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().split('T')[0];
+}
+
+function parseSpreadsheetBuffer(fileBuffer) {
+    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) return [];
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (rows.length < 2) return [];
+
+    const headers = rows[0].map((h) => normalizeImportHeader(h));
+    const dateIndex = findImportColumnIndex(headers, ['date', 'transactiondate', 'txndate', 'valuedate', 'postingdate']);
+    const debitIndex = findImportColumnIndex(headers, ['debit', 'dr', 'debitamount', 'dramount', 'withdrawal', 'withdrawalamount']);
+    const creditIndex = findImportColumnIndex(headers, ['credit', 'cr', 'creditamount', 'cramount', 'deposit', 'depositamount']);
+
+    if (dateIndex === -1 || (debitIndex === -1 && creditIndex === -1)) {
+        throw new Error('Spreadsheet must contain date and debit/dr or credit/cr columns');
+    }
+
+    return rows.slice(1)
+        .map((row) => {
+            const readColumn = (index) => {
+                if (index === -1 || index >= row.length) return null;
+                const value = row[index];
+                return value === '' ? null : value;
+            };
+
+            const parsedDate = toDateFromSpreadsheetCell(readColumn(dateIndex));
+            if (!parsedDate) return null;
+
+            return {
+                date: parsedDate,
                 debitAmount: readColumn(debitIndex),
                 creditAmount: readColumn(creditIndex)
             };
@@ -501,6 +561,7 @@ exports.importCsv = async (req, res) => {
         } else if (req.file) {
             const fileName = String(req.file.originalname || '').toLowerCase();
             const isZip = fileName.endsWith('.zip') || req.file.mimetype === 'application/zip' || req.file.mimetype === 'application/x-zip-compressed';
+            const isExcel = fileName.endsWith('.xls') || fileName.endsWith('.xlsx');
 
             if (isZip) {
                 const accountNumbers = await getDecryptedAccountNumbers(userId);
@@ -529,6 +590,10 @@ exports.importCsv = async (req, res) => {
 
                 expenses = parseCsvText(decryptedCsvText);
                 importHash = sha256Hex(Buffer.from(decryptedCsvText, 'utf8'));
+            } else if (isExcel) {
+                importMode = 'excel';
+                expenses = parseSpreadsheetBuffer(req.file.buffer);
+                importHash = sha256Hex(req.file.buffer);
             } else {
                 importMode = 'file';
                 const csvText = req.file.buffer.toString('utf8');
