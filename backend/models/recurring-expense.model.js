@@ -32,8 +32,7 @@ module.exports = (sequelize, Sequelize) => {
         },
         startDate: {
             type: Sequelize.DATEONLY,
-            allowNull: false,
-            defaultValue: Sequelize.NOW
+            allowNull: false
         },
         nextRunDate: {
             type: Sequelize.DATEONLY,

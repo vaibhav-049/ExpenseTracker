@@ -328,15 +328,30 @@ function parseCsvText(csvText) {
         throw new Error('CSV must contain date, category, and amount columns');
     }
 
-    return lines.slice(1).map((line) => {
-        const cols = parseCsvLine(line);
-        return {
-            date: cols[dateIndex],
-            category: cols[categoryIndex],
-            description: descriptionIndex >= 0 ? cols[descriptionIndex] : '',
-            amount: cols[amountIndex]
-        };
-    }).filter((exp) => exp.category && exp.amount !== '');
+    return lines.slice(1)
+        .map((line) => {
+            const cols = parseCsvLine(line);
+
+            if (
+                cols.length <= dateIndex
+                || cols.length <= categoryIndex
+                || cols.length <= amountIndex
+                || typeof cols[amountIndex] === 'undefined'
+                || cols[amountIndex] === ''
+                || !cols[dateIndex]
+                || !cols[categoryIndex]
+            ) {
+                return null;
+            }
+
+            return {
+                date: cols[dateIndex],
+                category: cols[categoryIndex],
+                description: descriptionIndex >= 0 && typeof cols[descriptionIndex] !== 'undefined' ? cols[descriptionIndex] : '',
+                amount: cols[amountIndex]
+            };
+        })
+        .filter((exp) => exp !== null);
 }
 
 function parseCsvLine(line) {
@@ -606,7 +621,10 @@ function toDateInputValue(dateString) {
     if (!dateString) return '';
     const date = new Date(dateString);
     if (Number.isNaN(date.getTime())) return '';
-    return date.toISOString().split('T')[0];
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
 function getCategoryClass(category) {

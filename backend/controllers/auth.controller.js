@@ -145,12 +145,13 @@ exports.updateBudget = async (req, res) => {
 
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         const monthlyExpenses = await Expense.findAll({
             where: {
                 userId: req.userId,
                 date: {
-                    [Op.between]: [startOfMonth, endOfMonth]
+                    [Op.gte]: startOfMonth,
+                    [Op.lt]: startOfNextMonth
                 }
             }
         });

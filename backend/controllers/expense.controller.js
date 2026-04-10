@@ -20,7 +20,12 @@ function addFrequency(dateString, frequency) {
     } else if (frequency === 'weekly') {
         date.setDate(date.getDate() + 7);
     } else {
-        date.setMonth(date.getMonth() + 1);
+        const originalDay = date.getDate();
+        const targetMonthIndex = date.getMonth() + 1;
+        const targetYear = date.getFullYear() + Math.floor(targetMonthIndex / 12);
+        const normalizedTargetMonth = targetMonthIndex % 12;
+        const lastDayOfTargetMonth = new Date(targetYear, normalizedTargetMonth + 1, 0).getDate();
+        date.setFullYear(targetYear, normalizedTargetMonth, Math.min(originalDay, lastDayOfTargetMonth));
     }
 
     return date.toISOString().split('T')[0];
@@ -46,29 +51,36 @@ async function processDueRecurringExpensesForUser(userId, io) {
     let generatedCount = 0;
 
     for (const recurring of recurringItems) {
+        const transaction = await db.sequelize.transaction();
         let currentRunDate = recurring.nextRunDate;
         let iterations = 0;
 
-        while (currentRunDate && currentRunDate <= today && iterations < MAX_RECURRING_CATCHUP) {
-            if (recurring.endDate && currentRunDate > recurring.endDate) {
-                break;
+        try {
+            while (currentRunDate && currentRunDate <= today && iterations < MAX_RECURRING_CATCHUP) {
+                if (recurring.endDate && currentRunDate > recurring.endDate) {
+                    break;
+                }
+
+                await Expense.create({
+                    userId,
+                    amount: recurring.amount,
+                    category: recurring.category,
+                    description: recurring.description || '',
+                    date: currentRunDate
+                }, { transaction });
+
+                generatedCount += 1;
+                iterations += 1;
+                currentRunDate = addFrequency(currentRunDate, recurring.frequency);
             }
 
-            await Expense.create({
-                userId,
-                amount: recurring.amount,
-                category: recurring.category,
-                description: recurring.description || '',
-                date: currentRunDate
-            });
-
-            generatedCount += 1;
-            iterations += 1;
-            currentRunDate = addFrequency(currentRunDate, recurring.frequency);
+            recurring.nextRunDate = currentRunDate || recurring.nextRunDate;
+            await recurring.save({ transaction });
+            await transaction.commit();
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
         }
-
-        recurring.nextRunDate = currentRunDate || recurring.nextRunDate;
-        await recurring.save();
     }
 
     if (io && generatedCount > 0) {
@@ -113,8 +125,6 @@ exports.getAll = async (req, res) => {
     try {
         const userId = req.userId;
         const { category, startDate, endDate } = req.query;
-        const io = req.app.get('io');
-        await processDueRecurringExpensesForUser(userId, io);
         let whereClause = { userId };
 
         if (category) {
@@ -287,6 +297,17 @@ exports.exportCsv = async (req, res) => {
             return `"${stringValue.replace(/"/g, '""')}"`;
         };
 
+        const toCsvDate = (value) => {
+            if (!value) return '';
+            if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                return value;
+            }
+
+            const parsedDate = new Date(value);
+            if (Number.isNaN(parsedDate.getTime())) return '';
+            return parsedDate.toISOString().split('T')[0];
+        };
+
         const rows = [
             'id,date,category,description,amount'
         ];
@@ -294,7 +315,7 @@ exports.exportCsv = async (req, res) => {
         expenses.forEach((expense) => {
             rows.push([
                 expense.id,
-                escapeCsvField(expense.date),
+                escapeCsvField(toCsvDate(expense.date)),
                 escapeCsvField(expense.category),
                 escapeCsvField(expense.description || ''),
                 Number(expense.amount).toFixed(2)
@@ -331,13 +352,23 @@ exports.importCsv = async (req, res) => {
             });
         }
 
-        const normalizedExpenses = expenses.map((expense) => ({
-            userId,
-            amount: parseFloat(expense.amount),
-            category: expense.category,
-            description: expense.description || '',
-            date: expense.date || new Date()
-        })).filter((expense) => !Number.isNaN(expense.amount) && expense.amount > 0 && expense.category);
+        const normalizedExpenses = expenses
+            .map((expense) => {
+                const parsedDate = new Date(expense.date);
+
+                if (Number.isNaN(parsedDate.getTime())) {
+                    return null;
+                }
+
+                return {
+                    userId,
+                    amount: parseFloat(expense.amount),
+                    category: expense.category,
+                    description: expense.description || '',
+                    date: parsedDate
+                };
+            })
+            .filter((expense) => expense && !Number.isNaN(expense.amount) && expense.amount > 0 && expense.category);
 
         if (normalizedExpenses.length > MAX_BULK_EXPENSES) {
             return res.status(413).json({
@@ -398,9 +429,14 @@ exports.createRecurring = async (req, res) => {
         const normalizedStartDate = toDateOnlyString(startDate || new Date());
         const normalizedEndDate = endDate ? toDateOnlyString(endDate) : null;
         const nextRunDate = addFrequency(normalizedStartDate, frequency);
+        const parsedAmount = parseFloat(amount);
 
         if (!normalizedStartDate || !nextRunDate) {
             return res.status(400).json({ message: 'Invalid start date' });
+        }
+
+        if (Number.isNaN(parsedAmount)) {
+            return res.status(400).json({ message: 'Amount must be a valid number' });
         }
 
         if (normalizedEndDate && normalizedEndDate < normalizedStartDate) {
@@ -409,7 +445,7 @@ exports.createRecurring = async (req, res) => {
 
         const recurringExpense = await RecurringExpense.create({
             userId,
-            amount: parseFloat(amount),
+            amount: parsedAmount,
             category,
             description: description || '',
             frequency,
@@ -446,11 +482,29 @@ exports.updateRecurring = async (req, res) => {
             return res.status(400).json({ message: 'Frequency must be daily, weekly, or monthly' });
         }
 
+        const nextFrequency = frequency || recurringExpense.frequency;
+        const parsedAmount = amount !== undefined ? parseFloat(amount) : recurringExpense.amount;
+
+        if (Number.isNaN(parsedAmount)) {
+            return res.status(400).json({ message: 'Amount must be a valid number' });
+        }
+
+        let nextRunDate = recurringExpense.nextRunDate;
+        if (frequency && frequency !== recurringExpense.frequency) {
+            const scheduleBaseDate = toDateOnlyString(new Date());
+            nextRunDate = addFrequency(scheduleBaseDate, nextFrequency);
+
+            if (!nextRunDate) {
+                return res.status(400).json({ message: 'Invalid frequency update' });
+            }
+        }
+
         await recurringExpense.update({
-            amount: amount !== undefined ? parseFloat(amount) : recurringExpense.amount,
+            amount: parsedAmount,
             category: category || recurringExpense.category,
             description: description !== undefined ? description : recurringExpense.description,
-            frequency: frequency || recurringExpense.frequency,
+            frequency: nextFrequency,
+            nextRunDate,
             endDate: endDate !== undefined ? (endDate ? toDateOnlyString(endDate) : null) : recurringExpense.endDate,
             isActive: isActive !== undefined ? Boolean(isActive) : recurringExpense.isActive
         });
