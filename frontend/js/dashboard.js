@@ -2,11 +2,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!checkAuth()) return;
     loadUserInfo();
     initRealtimeDashboard();
+    initializeBudgetControls();
     loadDashboard();
+    loadBudget();
 });
 
 let categoryChart = null;
 let dashboardSocket = null;
+let currentBudget = 0;
 
 function initRealtimeDashboard() {
     const user = JSON.parse(localStorage.getItem('user'));
@@ -20,6 +23,100 @@ function initRealtimeDashboard() {
     dashboardSocket.on('expense:changed', () => {
         loadDashboard();
     });
+
+    dashboardSocket.on('budget:changed', (payload) => {
+        if (payload && typeof payload.budget === 'number') {
+            currentBudget = payload.budget;
+            updateBudgetDisplay();
+            updateBudgetStatus(payload.monthlySpending || 0);
+        }
+    });
+
+    dashboardSocket.on('budget:alert', (payload) => {
+        if (!payload) return;
+
+        const spending = Number(payload.monthlySpending);
+        const budget = Number(payload.budget);
+
+        if (!Number.isFinite(spending) || !Number.isFinite(budget)) {
+            console.warn('Invalid budget alert payload received:', payload);
+            return;
+        }
+
+        showBudgetAlert(payload.level, spending, budget);
+    });
+}
+
+function initializeBudgetControls() {
+    const saveBudgetBtn = document.getElementById('save-budget-btn');
+    if (saveBudgetBtn) {
+        saveBudgetBtn.addEventListener('click', saveBudget);
+    }
+}
+
+async function loadBudget() {
+    try {
+        const response = await fetch(API.auth.budget, {
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            currentBudget = parseFloat(data.budget || 0);
+            updateBudgetDisplay();
+        }
+    } catch (error) {
+        console.error('Load budget error:', error);
+    }
+}
+
+async function saveBudget() {
+    const budgetInput = document.getElementById('monthly-budget-input');
+    if (!budgetInput) {
+        console.error('Budget input element not found');
+        alert('Budget input is not available right now. Please refresh and try again.');
+        return;
+    }
+
+    const budgetValue = parseFloat(budgetInput.value);
+
+    if (Number.isNaN(budgetValue) || budgetValue < 0) {
+        alert('Please enter a valid non-negative budget amount.');
+        return;
+    }
+
+    try {
+        const response = await fetch(API.auth.budget, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ budget: budgetValue })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to save budget');
+            return;
+        }
+
+        currentBudget = parseFloat(data.budget || 0);
+        updateBudgetDisplay();
+        loadDashboard();
+    } catch (error) {
+        console.error('Save budget error:', error);
+        alert('An error occurred while saving budget.');
+    }
+}
+
+function updateBudgetDisplay() {
+    const display = document.getElementById('current-budget-display');
+    const input = document.getElementById('monthly-budget-input');
+
+    if (display) {
+           display.textContent = `Current budget: ₹${currentBudget.toFixed(2)}`;
+    }
+    if (input) {
+        input.value = currentBudget > 0 ? currentBudget : '';
+    }
 }
 
 async function loadDashboard() {
@@ -33,6 +130,11 @@ async function loadDashboard() {
             headers: getAuthHeaders()
         });
         const expensesData = await expensesResponse.json();
+
+        const anomaliesResponse = await fetch(API.expenses.anomalies, {
+            headers: getAuthHeaders()
+        });
+        const anomaliesData = await anomaliesResponse.json();
 
         if (statsResponse.ok) {
             let overallSpending = 0;
@@ -48,15 +150,95 @@ async function loadDashboard() {
             renderRecentExpenses(expensesData.expenses.slice(0, 5));
         }
 
+        if (anomaliesResponse.ok) {
+            renderAnomalies(anomaliesData);
+        }
+
     } catch (error) {
         console.error('Dashboard error:', error);
     }
 }
+
+function escapeHtml(value) {
+    const stringValue = String(value ?? '');
+    return stringValue
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderAnomalies(data) {
+    const container = document.getElementById('anomalies-list');
+    if (!container) return;
+
+    const anomalies = data?.anomalies || [];
+    if (anomalies.length === 0) {
+        container.innerHTML = '<p class="text-sm text-green-600">No unusual spending spikes detected recently.</p>';
+        return;
+    }
+
+    container.innerHTML = anomalies.map((item) => {
+        const safeCategory = escapeHtml(item.category || 'Other');
+        const safeDescription = escapeHtml(item.description || '-');
+        return `
+            <div class="border border-red-100 rounded-xl p-4 bg-red-50/40">
+                <div class="flex items-center justify-between">
+                    <p class="font-semibold text-gray-800">${safeCategory}</p>
+                    <p class="font-bold text-red-600">₹${Number(item.amount || 0).toFixed(2)}</p>
+                </div>
+                <p class="text-sm text-gray-600 mt-1">${safeDescription}</p>
+                <p class="text-xs text-gray-500 mt-1">${formatDate(item.date)}</p>
+            </div>
+        `;
+    }).join('');
+}
 function updateStats(stats, overallSpending) {
-    document.getElementById('overall-spending').textContent = 'Rs. ' + overallSpending.toFixed(2);
-    document.getElementById('total-spending').textContent = 'Rs. ' + stats.totalSpending.toFixed(2);
+    document.getElementById('overall-spending').textContent = '₹' + overallSpending.toFixed(2);
+    document.getElementById('total-spending').textContent = '₹' + stats.totalSpending.toFixed(2);
     document.getElementById('expense-count').textContent = stats.expenseCount;
     document.getElementById('current-month').textContent = stats.month;
+    updateBudgetStatus(stats.totalSpending);
+}
+
+function updateBudgetStatus(monthlySpending) {
+    const status = document.getElementById('budget-status-message');
+    if (!status) return;
+
+    if (currentBudget <= 0) {
+        status.className = 'text-sm mt-2 text-gray-500';
+        status.textContent = 'Set your monthly budget to receive alerts.';
+        return;
+    }
+
+    const usagePercent = (monthlySpending / currentBudget) * 100;
+
+    if (usagePercent >= 100) {
+        status.className = 'text-sm mt-2 text-red-600 font-semibold';
+            status.textContent = `Budget exceeded: ${usagePercent.toFixed(1)}% used (₹${monthlySpending.toFixed(2)} / ₹${currentBudget.toFixed(2)}).`;
+        return;
+    }
+
+    if (usagePercent >= 80) {
+        status.className = 'text-sm mt-2 text-amber-600 font-semibold';
+            status.textContent = `Warning: ${usagePercent.toFixed(1)}% of budget used (₹${monthlySpending.toFixed(2)} / ₹${currentBudget.toFixed(2)}).`;
+        return;
+    }
+
+    status.className = 'text-sm mt-2 text-green-600';
+        status.textContent = `Healthy: ${usagePercent.toFixed(1)}% of budget used (₹${monthlySpending.toFixed(2)} / ₹${currentBudget.toFixed(2)}).`;
+}
+
+function showBudgetAlert(level, spending, budget) {
+    const toast = document.createElement('div');
+    const isExceeded = level === 'exceeded';
+    toast.className = `fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-lg text-white ${isExceeded ? 'bg-red-600' : 'bg-amber-500'}`;
+    toast.textContent = isExceeded
+           ? `Budget exceeded! ₹${spending.toFixed(2)} spent out of ₹${budget.toFixed(2)}.`
+           : `Budget warning: ₹${spending.toFixed(2)} spent out of ₹${budget.toFixed(2)}.`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3500);
 }
 function renderCategoryChart(categoryBreakdown) {
     const ctx = document.getElementById('categoryChart').getContext('2d');
@@ -141,7 +323,7 @@ function renderCategoryList(categoryBreakdown) {
                     <span class="text-gray-700">${category}</span>
                 </div>
                 <div class="text-right">
-                    <span class="font-medium text-gray-800">Rs. ${amount.toFixed(2)}</span>
+                    <span class="font-medium text-gray-800">₹${amount.toFixed(2)}</span>
                     <span class="text-gray-500 text-sm ml-2">(${percentage}%)</span>
                 </div>
             </div>
@@ -171,7 +353,7 @@ function renderRecentExpenses(expenses) {
                 </span>
             </td>
             <td class="py-4 text-gray-600">${expense.description || '-'}</td>
-            <td class="py-4 text-right font-medium">Rs. ${parseFloat(expense.amount).toFixed(2)}</td>
+                <td class="py-4 text-right font-medium">₹${parseFloat(expense.amount).toFixed(2)}</td>
         </tr>
     `).join('');
 }

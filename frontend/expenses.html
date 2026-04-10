@@ -75,10 +75,21 @@
                     <h2 class="text-3xl font-bold text-gray-800">My Expenses</h2>
                     <p class="text-gray-500 mt-1">Manage and track all your transactions</p>
                 </div>
-                <a href="add-expense.html" class="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition flex items-center space-x-2">
-                    <i class="fas fa-plus"></i>
-                    <span>Add Expense</span>
-                </a>
+                <div class="flex items-center gap-3">
+                    <button id="export-csv-btn" class="bg-emerald-600 text-white px-5 py-3 rounded-xl font-semibold hover:bg-emerald-700 transition flex items-center space-x-2">
+                        <i class="fas fa-file-csv"></i>
+                        <span>Export CSV</span>
+                    </button>
+                    <label for="import-csv-input" class="bg-amber-500 text-white px-5 py-3 rounded-xl font-semibold hover:bg-amber-600 transition flex items-center space-x-2 cursor-pointer">
+                        <i class="fas fa-upload"></i>
+                        <span>Import CSV</span>
+                    </label>
+                    <input id="import-csv-input" type="file" accept=".csv" class="hidden">
+                    <a href="add-expense.html" class="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition flex items-center space-x-2">
+                        <i class="fas fa-plus"></i>
+                        <span>Add Expense</span>
+                    </a>
+                </div>
             </div>
 
             <!-- Filters -->
@@ -112,6 +123,27 @@
                     <button onclick="clearFilters()" class="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition">
                         <i class="fas fa-times mr-2"></i>Clear
                     </button>
+                </div>
+            </div>
+
+            <!-- Recurring Rules -->
+            <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 fade-in">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-800">Recurring Rules</h3>
+                        <p class="text-sm text-gray-500">Manage auto-generated expenses (daily/weekly/monthly)</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="process-recurring-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
+                            Process Now
+                        </button>
+                        <button id="refresh-recurring-btn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <div id="recurring-list" class="space-y-2">
+                    <p class="text-sm text-gray-500">Loading recurring rules...</p>
                 </div>
             </div>
 
@@ -187,6 +219,66 @@
                         <i class="fas fa-save mr-2"></i>Save Changes
                     </button>
                     <button type="button" onclick="closeEditModal()" class="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Recurring Edit Modal -->
+    <div id="recurring-edit-modal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-bold text-gray-800">Edit Recurring Rule</h3>
+                <button id="close-recurring-modal-btn" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <form id="recurring-edit-form" class="space-y-4">
+                <input type="hidden" id="recurring-edit-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Amount (₹)</label>
+                    <input type="number" id="recurring-edit-amount" step="0.01" min="0.01" required class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                    <select id="recurring-edit-category" required class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                        <option value="Food">🍔 Food</option>
+                        <option value="Transport">🚗 Transport</option>
+                        <option value="Shopping">🛍️ Shopping</option>
+                        <option value="Bills">📄 Bills</option>
+                        <option value="Entertainment">🎬 Entertainment</option>
+                        <option value="Health">🏥 Health</option>
+                        <option value="Education">📚 Education</option>
+                        <option value="Other">📦 Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                    <input type="text" id="recurring-edit-description" class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+                    <select id="recurring-edit-frequency" required class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">End Date (optional)</label>
+                    <input type="date" id="recurring-edit-end-date" class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                </div>
+                <div class="flex items-center gap-3">
+                    <input type="checkbox" id="recurring-edit-active" class="w-4 h-4 text-purple-600">
+                    <label for="recurring-edit-active" class="text-sm font-medium text-gray-700">Rule is active</label>
+                </div>
+                <div class="flex space-x-3 pt-4">
+                    <button type="submit" class="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 rounded-xl font-semibold hover:shadow-lg transition">
+                        <i class="fas fa-save mr-2"></i>Save Rule
+                    </button>
+                    <button type="button" id="cancel-recurring-modal-btn" class="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300 transition">
                         Cancel
                     </button>
                 </div>
