@@ -3,14 +3,21 @@
     loadUserInfo();
     initRealtimeExpenses();
     initializeCsvControls();
+    initializeBankAccountControls();
     initializeRecurringControls();
     setupRecurringEditForm();
+    loadBankAccounts();
     loadExpenses();
     loadRecurringExpenses();
 });
 
 let expensesSocket = null;
 let recurringRulesCache = [];
+let bankAccountsCache = [];
+
+function getAuthToken() {
+    return localStorage.getItem('token');
+}
 
 function initRealtimeExpenses() {
     const user = JSON.parse(localStorage.getItem('user'));
@@ -37,6 +44,153 @@ function initializeCsvControls() {
 
     if (importInput) {
         importInput.addEventListener('change', handleCsvImport);
+    }
+}
+
+function initializeBankAccountControls() {
+    const form = document.getElementById('bank-account-form');
+    if (!form) return;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const accountNumberInput = document.getElementById('bank-account-number');
+        const accountTypeInput = document.getElementById('bank-account-type');
+        const accountLabelInput = document.getElementById('bank-account-label');
+
+        const accountNumber = accountNumberInput.value.trim();
+        if (!accountNumber) {
+            alert('Please enter an account number.');
+            return;
+        }
+
+        try {
+            const response = await fetch(API.auth.bankAccounts, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    accountNumber,
+                    accountType: accountTypeInput.value,
+                    label: accountLabelInput.value.trim()
+                })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.message || 'Failed to save account number');
+                return;
+            }
+
+            form.reset();
+            loadBankAccounts();
+            alert('Account number saved securely.');
+        } catch (error) {
+            console.error('Save bank account error:', error);
+            alert('An error occurred while saving account number.');
+        }
+    });
+}
+
+async function loadBankAccounts() {
+    const container = document.getElementById('bank-accounts-list');
+    if (!container) return;
+
+    try {
+        const response = await fetch(API.auth.bankAccounts, {
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            container.innerHTML = `<p class="text-sm text-red-500">${escapeHtml(data.message || 'Failed to load account numbers')}</p>`;
+            return;
+        }
+
+        bankAccountsCache = data.accounts || [];
+        renderBankAccounts();
+    } catch (error) {
+        console.error('Load bank accounts error:', error);
+        container.innerHTML = '<p class="text-sm text-red-500">An error occurred while loading account numbers.</p>';
+    }
+}
+
+function renderBankAccounts() {
+    const container = document.getElementById('bank-accounts-list');
+    if (!container) return;
+
+    if (bankAccountsCache.length === 0) {
+        container.innerHTML = '<p class="text-sm text-gray-500">No saved accounts yet.</p>';
+        return;
+    }
+
+    container.innerHTML = bankAccountsCache.map((account) => {
+        const safeType = escapeHtml(account.accountType || 'bank');
+        const safeLabel = escapeHtml(account.label || 'No label');
+        const statusBadge = account.isActive
+            ? '<span class="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>'
+            : '<span class="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">Paused</span>';
+
+        return `
+            <div class="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                    <p class="font-semibold text-gray-800 uppercase tracking-wide text-sm">${safeType}</p>
+                    <p class="text-sm text-gray-600">${safeLabel}</p>
+                    <p class="text-sm text-gray-500">••••${escapeHtml(account.accountNumberLast4)}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    ${statusBadge}
+                    <button onclick="toggleBankAccount(${account.id}, ${account.isActive ? 'false' : 'true'})" class="px-3 py-2 bg-amber-500 text-white rounded-lg text-xs font-medium hover:bg-amber-600 transition">
+                        ${account.isActive ? 'Pause' : 'Activate'}
+                    </button>
+                    <button onclick="deleteBankAccount(${account.id})" class="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function toggleBankAccount(id, isActive) {
+    try {
+        const response = await fetch(`${API.auth.bankAccounts}/${id}`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ isActive })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to update account status');
+            return;
+        }
+
+        loadBankAccounts();
+    } catch (error) {
+        console.error('Toggle bank account error:', error);
+        alert('An error occurred while updating account status.');
+    }
+}
+
+async function deleteBankAccount(id) {
+    if (!confirm('Delete this account number from secure vault?')) return;
+
+    try {
+        const response = await fetch(`${API.auth.bankAccounts}/${id}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to delete account number');
+            return;
+        }
+
+        loadBankAccounts();
+    } catch (error) {
+        console.error('Delete bank account error:', error);
+        alert('An error occurred while deleting account number.');
     }
 }
 
@@ -387,19 +541,15 @@ async function handleCsvImport(event) {
     if (!file) return;
 
     try {
-        const text = await file.text();
-        const parsedExpenses = parseCsvText(text);
+        const formData = new FormData();
+        formData.append('file', file);
 
-        if (parsedExpenses.length === 0) {
-            alert('No valid expenses found in CSV.');
-            event.target.value = '';
-            return;
-        }
-
-        const response = await fetch(`${API.expenses.base}/import`, {
+        const response = await fetch(API.expenses.import, {
             method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ expenses: parsedExpenses })
+            headers: {
+                'Authorization': `Bearer ${getAuthToken()}`
+            },
+            body: formData
         });
 
         const data = await response.json();
@@ -409,7 +559,13 @@ async function handleCsvImport(event) {
             return;
         }
 
-        alert(`CSV imported successfully. ${data.importedCount} expenses added.`);
+        const modeLabel = data.importMode === 'zip-password' ? ' (auto-unlocked via saved account number)' : '';
+        const skipped = Number(data.skippedDuplicateCount || 0);
+        if (Number(data.importedCount || 0) === 0 && skipped > 0) {
+            alert(`No new transactions imported. ${skipped} duplicate rows skipped${modeLabel}.`);
+        } else {
+            alert(`CSV imported successfully. ${data.importedCount} expenses added, ${skipped} duplicate rows skipped${modeLabel}.`);
+        }
         loadExpenses();
     } catch (error) {
         console.error('Import CSV error:', error);

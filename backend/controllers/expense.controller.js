@@ -1,9 +1,18 @@
 const db = require('../models');
+const crypto = require('crypto');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const StreamZip = require('node-stream-zip');
 const Expense = db.Expense;
 const RecurringExpense = db.RecurringExpense;
+const BankAccount = db.BankAccount;
+const ImportFile = db.ImportFile;
+const { decryptAccountNumber } = require('../lib/account-vault');
 const { Op } = db.Sequelize;
 const MAX_BULK_EXPENSES = Number.parseInt(process.env.MAX_BULK_EXPENSES || '500', 10);
 const MAX_RECURRING_CATCHUP = Number.parseInt(process.env.MAX_RECURRING_CATCHUP || '24', 10);
+const MAX_IMPORT_PASSWORD_ATTEMPTS = Number.parseInt(process.env.MAX_IMPORT_PASSWORD_ATTEMPTS || '50', 10);
 
 function toDateOnlyString(dateInput) {
     const date = new Date(dateInput);
@@ -29,6 +38,150 @@ function addFrequency(dateString, frequency) {
     }
 
     return date.toISOString().split('T')[0];
+}
+
+function parseCsvLine(line) {
+    const fields = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+        const char = line[i];
+
+        if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i += 1;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (char === ',' && !inQuotes) {
+            fields.push(current.trim());
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+
+    fields.push(current.trim());
+
+    return fields.map((value) => value.replace(/^"|"$/g, '').replace(/""/g, '"'));
+}
+
+function parseCsvText(csvText) {
+    const lines = String(csvText || '').split(/\r?\n/).filter((line) => line.trim().length > 0);
+    if (lines.length < 2) {
+        return [];
+    }
+
+    const normalizeHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const headers = parseCsvLine(lines[0]).map((h) => normalizeHeader(h));
+    const findIndex = (aliases) => headers.findIndex((header) => aliases.includes(header));
+
+    const dateIndex = findIndex(['date', 'transactiondate', 'txndate', 'valuedate', 'postingdate']);
+    const debitIndex = findIndex(['debit', 'dr', 'debitamount', 'dramount', 'withdrawal', 'withdrawalamount']);
+    const creditIndex = findIndex(['credit', 'cr', 'creditamount', 'cramount', 'deposit', 'depositamount']);
+
+    if (dateIndex === -1 || (debitIndex === -1 && creditIndex === -1)) {
+        throw new Error('CSV must contain date and debit/dr or credit/cr columns');
+    }
+
+    return lines.slice(1)
+        .map((line) => {
+            const cols = parseCsvLine(line);
+
+            const readColumn = (index) => {
+                if (index === -1 || index >= cols.length) return null;
+                const value = cols[index];
+                return value === '' ? null : value;
+            };
+
+            if (
+                cols.length <= dateIndex
+                || !cols[dateIndex]
+            ) {
+                return null;
+            }
+
+            return {
+                date: cols[dateIndex],
+                debitAmount: readColumn(debitIndex),
+                creditAmount: readColumn(creditIndex)
+            };
+        })
+        .filter((expense) => expense !== null);
+}
+
+function parseAmountValue(value) {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const isParenthesizedNegative = /^\(.*\)$/.test(raw);
+    const numericText = raw.replace(/[(),\s₹$]/g, '');
+    const parsed = parseFloat(numericText);
+
+    if (Number.isNaN(parsed)) return null;
+    return isParenthesizedNegative ? -parsed : parsed;
+}
+
+function sha256Hex(payload) {
+    return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
+function expenseSignature(expense) {
+    const normalizedDate = toDateOnlyString(expense.date);
+    const normalizedAmount = Number(expense.amount).toFixed(2);
+    return `${normalizedDate}|${normalizedAmount}|${expense.category}|${expense.description || ''}`;
+}
+
+async function extractCsvFromZipWithPassword(zipBuffer, password) {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'expense-import-'));
+    const zipPath = path.join(tempDir, 'import.zip');
+    let zip = null;
+
+    try {
+        await fs.writeFile(zipPath, zipBuffer);
+        zip = new StreamZip.async({ file: zipPath, password });
+        const entries = await zip.entries();
+        const csvEntry = Object.values(entries).find((entry) => !entry.isDirectory && entry.name.toLowerCase().endsWith('.csv'));
+
+        if (!csvEntry) {
+            throw new Error('No CSV file found in zip archive');
+        }
+
+        const csvBuffer = await zip.entryData(csvEntry.name);
+        return csvBuffer.toString('utf8');
+    } finally {
+        if (zip) {
+            await zip.close().catch(() => {});
+        }
+
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
+async function getDecryptedAccountNumbers(userId) {
+    const accounts = await BankAccount.findAll({
+        where: { userId, isActive: true },
+        attributes: ['accountNumberEncrypted'],
+        order: [['createdAt', 'DESC']],
+        limit: MAX_IMPORT_PASSWORD_ATTEMPTS
+    });
+
+    const accountNumbers = [];
+    for (const account of accounts) {
+        try {
+            const decrypted = decryptAccountNumber(account.accountNumberEncrypted);
+            if (decrypted) {
+                accountNumbers.push(decrypted);
+            }
+        } catch (error) {
+            console.warn('Failed to decrypt one stored account number:', error.message);
+        }
+    }
+
+    return accountNumbers;
 }
 
 async function processDueRecurringExpensesForUser(userId, io) {
@@ -338,10 +491,54 @@ exports.importCsv = async (req, res) => {
     try {
         const io = req.app.get('io');
         const userId = req.userId;
-        const { expenses } = req.body;
+        let expenses = null;
+        let importMode = 'json';
+        let importHash = null;
+
+        if (Array.isArray(req.body?.expenses)) {
+            expenses = req.body.expenses;
+            importHash = sha256Hex(Buffer.from(JSON.stringify(expenses), 'utf8'));
+        } else if (req.file) {
+            const fileName = String(req.file.originalname || '').toLowerCase();
+            const isZip = fileName.endsWith('.zip') || req.file.mimetype === 'application/zip' || req.file.mimetype === 'application/x-zip-compressed';
+
+            if (isZip) {
+                const accountNumbers = await getDecryptedAccountNumbers(userId);
+                if (accountNumbers.length === 0) {
+                    return res.status(400).json({ message: 'No active account numbers found. Add an account number first.' });
+                }
+
+                let decryptedCsvText = null;
+                for (const accountNumber of accountNumbers) {
+                    try {
+                        decryptedCsvText = await extractCsvFromZipWithPassword(req.file.buffer, accountNumber);
+                        if (decryptedCsvText) {
+                            importMode = 'zip-password';
+                            break;
+                        }
+                    } catch {
+                        // Try next stored account number.
+                    }
+                }
+
+                if (!decryptedCsvText) {
+                    return res.status(400).json({
+                        message: 'Unable to unlock protected CSV with saved account numbers. Please verify account numbers.'
+                    });
+                }
+
+                expenses = parseCsvText(decryptedCsvText);
+                importHash = sha256Hex(Buffer.from(decryptedCsvText, 'utf8'));
+            } else {
+                importMode = 'file';
+                const csvText = req.file.buffer.toString('utf8');
+                expenses = parseCsvText(csvText);
+                importHash = sha256Hex(Buffer.from(csvText, 'utf8'));
+            }
+        }
 
         if (!Array.isArray(expenses) || expenses.length === 0) {
-            return res.status(400).json({ message: 'Expenses array is required' });
+            return res.status(400).json({ message: 'No valid expenses found in import payload' });
         }
 
         if (expenses.length > MAX_BULK_EXPENSES) {
@@ -352,23 +549,62 @@ exports.importCsv = async (req, res) => {
             });
         }
 
+        if (importHash) {
+            const existingImport = await ImportFile.findOne({
+                where: { userId, fileHash: importHash },
+                attributes: ['id', 'createdAt']
+            });
+
+            if (existingImport) {
+                return res.status(200).json({
+                    message: 'This file has already been imported.',
+                    importedCount: 0,
+                    skippedDuplicateCount: expenses.length,
+                    duplicateFile: true,
+                    importMode
+                });
+            }
+        }
+
         const normalizedExpenses = expenses
-            .map((expense) => {
+            .flatMap((expense) => {
+                if (expense.date == null) {
+                    return [];
+                }
+
                 const parsedDate = new Date(expense.date);
 
                 if (Number.isNaN(parsedDate.getTime())) {
-                    return null;
+                    return [];
                 }
 
-                return {
-                    userId,
-                    amount: parseFloat(expense.amount),
-                    category: expense.category,
-                    description: expense.description || '',
-                    date: parsedDate
-                };
+                const debitAmount = parseAmountValue(expense.debitAmount ?? expense.debit ?? expense.dr ?? expense.amount);
+                const creditAmount = parseAmountValue(expense.creditAmount ?? expense.credit ?? expense.cr);
+                const rows = [];
+
+                if (debitAmount !== null && debitAmount > 0) {
+                    rows.push({
+                        userId,
+                        amount: debitAmount,
+                        category: 'Bank Debit',
+                        description: 'Imported bank debit',
+                        date: parsedDate
+                    });
+                }
+
+                if (creditAmount !== null && creditAmount > 0) {
+                    rows.push({
+                        userId,
+                        amount: -creditAmount,
+                        category: 'Bank Credit',
+                        description: 'Imported bank credit',
+                        date: parsedDate
+                    });
+                }
+
+                return rows;
             })
-            .filter((expense) => expense && !Number.isNaN(expense.amount) && expense.amount > 0 && expense.category);
+            .filter((expense) => expense && !Number.isNaN(expense.amount) && expense.amount !== 0 && expense.category);
 
         if (normalizedExpenses.length > MAX_BULK_EXPENSES) {
             return res.status(413).json({
@@ -382,18 +618,82 @@ exports.importCsv = async (req, res) => {
             return res.status(400).json({ message: 'No valid expenses found in payload' });
         }
 
-        await Expense.bulkCreate(normalizedExpenses);
+        const uniqueDates = [...new Set(normalizedExpenses
+            .map((expense) => toDateOnlyString(expense.date))
+            .filter((value) => value))];
 
-        io.to(`user_${userId}`).emit('expense:changed', {
-            action: 'imported',
-            count: normalizedExpenses.length
-        });
+        const uniqueAmounts = [...new Set(normalizedExpenses.map((expense) => Number(expense.amount).toFixed(2)))];
+
+        let existingSignatures = new Set();
+        if (uniqueDates.length > 0 && uniqueAmounts.length > 0) {
+            const existingExpenses = await Expense.findAll({
+                where: {
+                    userId,
+                    date: { [Op.in]: uniqueDates },
+                    category: { [Op.in]: ['Bank Debit', 'Bank Credit'] },
+                    description: { [Op.in]: ['Imported bank debit', 'Imported bank credit'] },
+                    amount: { [Op.in]: uniqueAmounts }
+                },
+                attributes: ['date', 'amount', 'category', 'description']
+            });
+
+            existingSignatures = new Set(existingExpenses.map((expense) => expenseSignature(expense)));
+        }
+
+        const dedupedExpenses = normalizedExpenses.filter((expense) => !existingSignatures.has(expenseSignature(expense)));
+        const skippedDuplicateCount = normalizedExpenses.length - dedupedExpenses.length;
+
+        if (dedupedExpenses.length === 0) {
+            if (importHash) {
+                await ImportFile.create({
+                    userId,
+                    fileHash: importHash,
+                    importMode,
+                    importedCount: 0
+                });
+            }
+
+            return res.status(200).json({
+                message: 'No new transactions found. All rows were duplicates.',
+                importedCount: 0,
+                skippedDuplicateCount,
+                importMode
+            });
+        }
+
+        await Expense.bulkCreate(dedupedExpenses);
+
+        if (importHash) {
+            await ImportFile.create({
+                userId,
+                fileHash: importHash,
+                importMode,
+                importedCount: dedupedExpenses.length
+            });
+        }
+
+        if (io) {
+            io.to(`user_${userId}`).emit('expense:changed', {
+                action: 'imported',
+                count: dedupedExpenses.length
+            });
+        }
 
         res.status(201).json({
             message: 'Expenses imported successfully',
-            importedCount: normalizedExpenses.length
+            importedCount: dedupedExpenses.length,
+            skippedDuplicateCount,
+            importMode
         });
     } catch (error) {
+        if (error && error.name === 'SequelizeUniqueConstraintError') {
+            return res.status(200).json({
+                message: 'This file has already been imported.',
+                importedCount: 0,
+                duplicateFile: true
+            });
+        }
+
         console.error('Import CSV error:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
@@ -485,8 +785,8 @@ exports.updateRecurring = async (req, res) => {
         const nextFrequency = frequency || recurringExpense.frequency;
         const parsedAmount = amount !== undefined ? parseFloat(amount) : recurringExpense.amount;
 
-        if (Number.isNaN(parsedAmount)) {
-            return res.status(400).json({ message: 'Amount must be a valid number' });
+        if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+            return res.status(400).json({ message: 'Amount must be a positive number' });
         }
 
         let nextRunDate = recurringExpense.nextRunDate;

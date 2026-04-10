@@ -84,7 +84,7 @@
                         <i class="fas fa-upload"></i>
                         <span>Import CSV</span>
                     </label>
-                    <input id="import-csv-input" type="file" accept=".csv" class="hidden">
+                    <input id="import-csv-input" type="file" accept=".csv,.zip" class="hidden">
                     <a href="add-expense.html" class="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition flex items-center space-x-2">
                         <i class="fas fa-plus"></i>
                         <span>Add Expense</span>
@@ -123,6 +123,36 @@
                     <button onclick="clearFilters()" class="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition">
                         <i class="fas fa-times mr-2"></i>Clear
                     </button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 fade-in">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-800">Import Account Vault</h3>
+                        <p class="text-sm text-gray-500">Save account numbers securely. Protected ZIP/CSV imports will auto-try these passwords.</p>
+                    </div>
+                </div>
+
+                <form id="bank-account-form" class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                    <input id="bank-account-number" type="text" required placeholder="Account Number / Password"
+                           class="md:col-span-2 px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                    <select id="bank-account-type" class="px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                        <option value="bank">Bank</option>
+                        <option value="card">Card</option>
+                        <option value="upi">UPI</option>
+                        <option value="wallet">Wallet</option>
+                        <option value="other">Other</option>
+                    </select>
+                    <input id="bank-account-label" type="text" placeholder="Label (optional)"
+                           class="px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition">
+                    <button type="submit" class="md:col-span-4 bg-indigo-600 text-white px-5 py-3 rounded-xl font-semibold hover:bg-indigo-700 transition">
+                        Save Account Number Securely
+                    </button>
+                </form>
+
+                <div id="bank-accounts-list" class="space-y-2">
+                    <p class="text-sm text-gray-500">No saved accounts yet.</p>
                 </div>
             </div>
 

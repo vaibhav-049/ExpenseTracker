@@ -1,14 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const expenseController = require('../controllers/expense.controller');
 const authMiddleware = require('../middleware/auth.middleware');
+const upload = multer({ storage: multer.memoryStorage() });
 router.use(authMiddleware);
 router.post('/', expenseController.create);
 router.get('/', expenseController.getAll);
 router.get('/stats', expenseController.getStats);
 router.get('/anomalies', expenseController.getAnomalies);
 router.get('/export', expenseController.exportCsv);
-router.post('/import', expenseController.importCsv);
+router.post('/import', upload.single('file'), expenseController.importCsv);
 router.get('/recurring', expenseController.getRecurring);
 router.post('/recurring', expenseController.createRecurring);
 router.put('/recurring/:id', expenseController.updateRecurring);
