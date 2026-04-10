@@ -597,8 +597,8 @@ async function importSelectedFile(file) {
 
         const data = await response.json();
         if (!response.ok) {
-            alert(data.message || 'Failed to import CSV');
-            event.target.value = '';
+            const errorMessage = data.message === 'Server error' && data.error ? data.error : data.message;
+            alert(errorMessage || 'Failed to import file');
             return;
         }
 

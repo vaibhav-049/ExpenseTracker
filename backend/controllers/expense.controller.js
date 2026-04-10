@@ -134,8 +134,11 @@ function toDateFromSpreadsheetCell(cellValue) {
     return parsed.toISOString().split('T')[0];
 }
 
-function parseSpreadsheetBuffer(fileBuffer) {
-    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+function parseSpreadsheetBuffer(fileBuffer, password) {
+    const workbook = XLSX.read(fileBuffer, {
+        type: 'buffer',
+        ...(password ? { password } : {})
+    });
     const firstSheetName = workbook.SheetNames[0];
     if (!firstSheetName) return [];
 
@@ -170,6 +173,26 @@ function parseSpreadsheetBuffer(fileBuffer) {
             };
         })
         .filter((expense) => expense !== null);
+}
+
+function isPasswordProtectedSpreadsheetError(error) {
+    const message = String(error?.message || '').toLowerCase();
+    return message.includes('password') && message.includes('protect');
+}
+
+async function parseProtectedSpreadsheetWithAccounts(fileBuffer, accountNumbers) {
+    for (const accountNumber of accountNumbers) {
+        try {
+            const parsed = parseSpreadsheetBuffer(fileBuffer, accountNumber);
+            if (parsed.length > 0) {
+                return parsed;
+            }
+        } catch {
+            // Try the next saved account number.
+        }
+    }
+
+    return null;
 }
 
 function parseAmountValue(value) {
@@ -562,6 +585,7 @@ exports.importCsv = async (req, res) => {
             const fileName = String(req.file.originalname || '').toLowerCase();
             const isZip = fileName.endsWith('.zip') || req.file.mimetype === 'application/zip' || req.file.mimetype === 'application/x-zip-compressed';
             const isExcel = fileName.endsWith('.xls') || fileName.endsWith('.xlsx');
+            const isCsv = fileName.endsWith('.csv');
 
             if (isZip) {
                 const accountNumbers = await getDecryptedAccountNumbers(userId);
@@ -592,8 +616,37 @@ exports.importCsv = async (req, res) => {
                 importHash = sha256Hex(Buffer.from(decryptedCsvText, 'utf8'));
             } else if (isExcel) {
                 importMode = 'excel';
-                expenses = parseSpreadsheetBuffer(req.file.buffer);
+                try {
+                    expenses = parseSpreadsheetBuffer(req.file.buffer);
+                } catch (error) {
+                    if (isPasswordProtectedSpreadsheetError(error)) {
+                        const accountNumbers = await getDecryptedAccountNumbers(userId);
+                        if (accountNumbers.length === 0) {
+                            return res.status(400).json({
+                                message: 'Spreadsheet is password-protected. Add an account number first for auto-unlock.'
+                            });
+                        }
+
+                        const parsedExpenses = await parseProtectedSpreadsheetWithAccounts(req.file.buffer, accountNumbers);
+                        if (!parsedExpenses) {
+                            return res.status(400).json({
+                                message: 'Unable to unlock protected spreadsheet with saved account numbers. Please verify account numbers.'
+                            });
+                        }
+
+                        expenses = parsedExpenses;
+                        importMode = 'excel-password';
+                    } else {
+                    return res.status(400).json({
+                        message: 'Invalid spreadsheet format. Ensure first sheet has date and debit/dr or credit/cr columns.'
+                    });
+                    }
+                }
                 importHash = sha256Hex(req.file.buffer);
+            } else if (!isCsv) {
+                return res.status(400).json({
+                    message: 'Unsupported file type. Please upload .csv, .zip, .xls, or .xlsx file.'
+                });
             } else {
                 importMode = 'file';
                 const csvText = req.file.buffer.toString('utf8');
@@ -751,6 +804,16 @@ exports.importCsv = async (req, res) => {
             importMode
         });
     } catch (error) {
+        const safeImportErrors = [
+            'CSV must contain date and debit/dr or credit/cr columns',
+            'Spreadsheet must contain date and debit/dr or credit/cr columns',
+            'No CSV file found in zip archive'
+        ];
+
+        if (safeImportErrors.includes(error?.message)) {
+            return res.status(400).json({ message: error.message });
+        }
+
         if (error && error.name === 'SequelizeUniqueConstraintError') {
             return res.status(200).json({
                 message: 'This file has already been imported.',
