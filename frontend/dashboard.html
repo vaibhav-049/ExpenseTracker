@@ -118,6 +118,23 @@
                 </div>
             </div>
 
+            <div class="bg-white rounded-2xl shadow-sm p-6 mb-8 fade-in">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-800">Monthly Budget</h3>
+                        <p id="current-budget-display" class="text-gray-600 mt-1">Current budget: Rs. 0.00</p>
+                        <p id="budget-status-message" class="text-sm mt-2 text-gray-500">Set your monthly budget to receive alerts.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <input id="monthly-budget-input" type="number" min="0" step="0.01" placeholder="Enter budget"
+                               class="px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 outline-none transition w-48">
+                        <button id="save-budget-btn" class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-5 py-3 rounded-xl font-semibold hover:shadow-lg transition">
+                            Save Budget
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Stats Cards -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <!-- Total Spending (All Time) -->

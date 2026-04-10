@@ -12,7 +12,8 @@ const API = {
     auth: {
         login: `${API_BASE_URL}/auth/login`,
         register: `${API_BASE_URL}/auth/register`,
-        profile: `${API_BASE_URL}/auth/profile`
+        profile: `${API_BASE_URL}/auth/profile`,
+        budget: `${API_BASE_URL}/auth/budget`
     },
     expenses: {
         base: `${API_BASE_URL}/expenses`,

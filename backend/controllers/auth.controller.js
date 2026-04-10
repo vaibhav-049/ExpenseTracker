@@ -2,6 +2,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('../models');
 const User = db.User;
+const Expense = db.Expense;
+const { Op } = db.Sequelize;
 
 exports.register = async (req, res) => {
     try {
@@ -101,6 +103,80 @@ exports.getProfile = async (req, res) => {
 
     } catch (error) {
         console.error('Get profile error:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+exports.getBudget = async (req, res) => {
+    try {
+        const user = await User.findByPk(req.userId, {
+            attributes: ['id', 'budget']
+        });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({ budget: parseFloat(user.budget || 0) });
+
+    } catch (error) {
+        console.error('Get budget error:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+exports.updateBudget = async (req, res) => {
+    try {
+        const io = req.app.get('io');
+        const { budget } = req.body;
+        const parsedBudget = parseFloat(budget);
+
+        if (Number.isNaN(parsedBudget) || parsedBudget < 0) {
+            return res.status(400).json({ message: 'Budget must be a valid non-negative number' });
+        }
+
+        const user = await User.findByPk(req.userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        user.budget = parsedBudget;
+        await user.save();
+
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const monthlyExpenses = await Expense.findAll({
+            where: {
+                userId: req.userId,
+                date: {
+                    [Op.between]: [startOfMonth, endOfMonth]
+                }
+            }
+        });
+
+        const monthlySpending = monthlyExpenses.reduce((sum, exp) => sum + parseFloat(exp.amount || 0), 0);
+
+        io.to(`user_${req.userId}`).emit('budget:changed', {
+            budget: parsedBudget,
+            monthlySpending
+        });
+
+        if (parsedBudget > 0 && monthlySpending >= parsedBudget * 0.8) {
+            io.to(`user_${req.userId}`).emit('budget:alert', {
+                monthlySpending,
+                budget: parsedBudget,
+                level: monthlySpending >= parsedBudget ? 'exceeded' : 'warning'
+            });
+        }
+
+        res.json({
+            message: 'Budget updated successfully',
+            budget: parsedBudget
+        });
+
+    } catch (error) {
+        console.error('Update budget error:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
