@@ -112,7 +112,7 @@ function updateBudgetDisplay() {
     const input = document.getElementById('monthly-budget-input');
 
     if (display) {
-        display.textContent = `Current budget: Rs. ${currentBudget.toFixed(2)}`;
+           display.textContent = `Current budget: ₹${currentBudget.toFixed(2)}`;
     }
     if (input) {
         input.value = currentBudget > 0 ? currentBudget : '';
@@ -131,6 +131,11 @@ async function loadDashboard() {
         });
         const expensesData = await expensesResponse.json();
 
+        const anomaliesResponse = await fetch(API.expenses.anomalies, {
+            headers: getAuthHeaders()
+        });
+        const anomaliesData = await anomaliesResponse.json();
+
         if (statsResponse.ok) {
             let overallSpending = 0;
             if (expensesData.expenses && expensesData.expenses.length > 0) {
@@ -145,13 +150,53 @@ async function loadDashboard() {
             renderRecentExpenses(expensesData.expenses.slice(0, 5));
         }
 
+        if (anomaliesResponse.ok) {
+            renderAnomalies(anomaliesData);
+        }
+
     } catch (error) {
         console.error('Dashboard error:', error);
     }
 }
+
+function escapeHtml(value) {
+    const stringValue = String(value ?? '');
+    return stringValue
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderAnomalies(data) {
+    const container = document.getElementById('anomalies-list');
+    if (!container) return;
+
+    const anomalies = data?.anomalies || [];
+    if (anomalies.length === 0) {
+        container.innerHTML = '<p class="text-sm text-green-600">No unusual spending spikes detected recently.</p>';
+        return;
+    }
+
+    container.innerHTML = anomalies.map((item) => {
+        const safeCategory = escapeHtml(item.category || 'Other');
+        const safeDescription = escapeHtml(item.description || '-');
+        return `
+            <div class="border border-red-100 rounded-xl p-4 bg-red-50/40">
+                <div class="flex items-center justify-between">
+                    <p class="font-semibold text-gray-800">${safeCategory}</p>
+                    <p class="font-bold text-red-600">₹${Number(item.amount || 0).toFixed(2)}</p>
+                </div>
+                <p class="text-sm text-gray-600 mt-1">${safeDescription}</p>
+                <p class="text-xs text-gray-500 mt-1">${formatDate(item.date)}</p>
+            </div>
+        `;
+    }).join('');
+}
 function updateStats(stats, overallSpending) {
-    document.getElementById('overall-spending').textContent = 'Rs. ' + overallSpending.toFixed(2);
-    document.getElementById('total-spending').textContent = 'Rs. ' + stats.totalSpending.toFixed(2);
+    document.getElementById('overall-spending').textContent = '₹' + overallSpending.toFixed(2);
+    document.getElementById('total-spending').textContent = '₹' + stats.totalSpending.toFixed(2);
     document.getElementById('expense-count').textContent = stats.expenseCount;
     document.getElementById('current-month').textContent = stats.month;
     updateBudgetStatus(stats.totalSpending);
@@ -171,18 +216,18 @@ function updateBudgetStatus(monthlySpending) {
 
     if (usagePercent >= 100) {
         status.className = 'text-sm mt-2 text-red-600 font-semibold';
-        status.textContent = `Budget exceeded: ${usagePercent.toFixed(1)}% used (Rs. ${monthlySpending.toFixed(2)} / Rs. ${currentBudget.toFixed(2)}).`;
+            status.textContent = `Budget exceeded: ${usagePercent.toFixed(1)}% used (₹${monthlySpending.toFixed(2)} / ₹${currentBudget.toFixed(2)}).`;
         return;
     }
 
     if (usagePercent >= 80) {
         status.className = 'text-sm mt-2 text-amber-600 font-semibold';
-        status.textContent = `Warning: ${usagePercent.toFixed(1)}% of budget used (Rs. ${monthlySpending.toFixed(2)} / Rs. ${currentBudget.toFixed(2)}).`;
+            status.textContent = `Warning: ${usagePercent.toFixed(1)}% of budget used (₹${monthlySpending.toFixed(2)} / ₹${currentBudget.toFixed(2)}).`;
         return;
     }
 
     status.className = 'text-sm mt-2 text-green-600';
-    status.textContent = `Healthy: ${usagePercent.toFixed(1)}% of budget used (Rs. ${monthlySpending.toFixed(2)} / Rs. ${currentBudget.toFixed(2)}).`;
+        status.textContent = `Healthy: ${usagePercent.toFixed(1)}% of budget used (₹${monthlySpending.toFixed(2)} / ₹${currentBudget.toFixed(2)}).`;
 }
 
 function showBudgetAlert(level, spending, budget) {
@@ -190,8 +235,8 @@ function showBudgetAlert(level, spending, budget) {
     const isExceeded = level === 'exceeded';
     toast.className = `fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-lg text-white ${isExceeded ? 'bg-red-600' : 'bg-amber-500'}`;
     toast.textContent = isExceeded
-        ? `Budget exceeded! Rs. ${spending.toFixed(2)} spent out of Rs. ${budget.toFixed(2)}.`
-        : `Budget warning: Rs. ${spending.toFixed(2)} spent out of Rs. ${budget.toFixed(2)}.`;
+           ? `Budget exceeded! ₹${spending.toFixed(2)} spent out of ₹${budget.toFixed(2)}.`
+           : `Budget warning: ₹${spending.toFixed(2)} spent out of ₹${budget.toFixed(2)}.`;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3500);
 }
@@ -278,7 +323,7 @@ function renderCategoryList(categoryBreakdown) {
                     <span class="text-gray-700">${category}</span>
                 </div>
                 <div class="text-right">
-                    <span class="font-medium text-gray-800">Rs. ${amount.toFixed(2)}</span>
+                    <span class="font-medium text-gray-800">₹${amount.toFixed(2)}</span>
                     <span class="text-gray-500 text-sm ml-2">(${percentage}%)</span>
                 </div>
             </div>
@@ -308,7 +353,7 @@ function renderRecentExpenses(expenses) {
                 </span>
             </td>
             <td class="py-4 text-gray-600">${expense.description || '-'}</td>
-            <td class="py-4 text-right font-medium">Rs. ${parseFloat(expense.amount).toFixed(2)}</td>
+                <td class="py-4 text-right font-medium">₹${parseFloat(expense.amount).toFixed(2)}</td>
         </tr>
     `).join('');
 }

@@ -1,12 +1,16 @@
-document.addEventListener('DOMContentLoaded', () => {
+﻿document.addEventListener('DOMContentLoaded', () => {
     if (!checkAuth()) return;
     loadUserInfo();
     initRealtimeExpenses();
     initializeCsvControls();
+    initializeRecurringControls();
+    setupRecurringEditForm();
     loadExpenses();
+    loadRecurringExpenses();
 });
 
 let expensesSocket = null;
+let recurringRulesCache = [];
 
 function initRealtimeExpenses() {
     const user = JSON.parse(localStorage.getItem('user'));
@@ -19,6 +23,7 @@ function initRealtimeExpenses() {
 
     expensesSocket.on('expense:changed', () => {
         loadExpenses();
+        loadRecurringExpenses();
     });
 }
 
@@ -32,6 +37,229 @@ function initializeCsvControls() {
 
     if (importInput) {
         importInput.addEventListener('change', handleCsvImport);
+    }
+}
+
+function initializeRecurringControls() {
+    const refreshBtn = document.getElementById('refresh-recurring-btn');
+    const processBtn = document.getElementById('process-recurring-btn');
+    const closeRecurringModalBtn = document.getElementById('close-recurring-modal-btn');
+    const cancelRecurringModalBtn = document.getElementById('cancel-recurring-modal-btn');
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadRecurringExpenses);
+    }
+
+    if (processBtn) {
+        processBtn.addEventListener('click', processRecurringNow);
+    }
+
+    if (closeRecurringModalBtn) {
+        closeRecurringModalBtn.addEventListener('click', closeRecurringEditModal);
+    }
+
+    if (cancelRecurringModalBtn) {
+        cancelRecurringModalBtn.addEventListener('click', closeRecurringEditModal);
+    }
+}
+
+function setupRecurringEditForm() {
+    const recurringEditForm = document.getElementById('recurring-edit-form');
+    if (!recurringEditForm) return;
+
+    recurringEditForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const id = document.getElementById('recurring-edit-id').value;
+        const amount = document.getElementById('recurring-edit-amount').value;
+        const category = document.getElementById('recurring-edit-category').value;
+        const description = document.getElementById('recurring-edit-description').value;
+        const frequency = document.getElementById('recurring-edit-frequency').value;
+        const endDate = document.getElementById('recurring-edit-end-date').value;
+        const isActive = document.getElementById('recurring-edit-active').checked;
+
+        try {
+            const response = await fetch(`${API.expenses.recurring}/${id}`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    amount,
+                    category,
+                    description,
+                    frequency,
+                    endDate: endDate || null,
+                    isActive
+                })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.message || 'Failed to update recurring rule');
+                return;
+            }
+
+            closeRecurringEditModal();
+            loadRecurringExpenses();
+        } catch (error) {
+            console.error('Recurring edit update error:', error);
+            alert('An error occurred while updating recurring rule.');
+        }
+    });
+}
+
+async function loadRecurringExpenses() {
+    const container = document.getElementById('recurring-list');
+    if (!container) return;
+
+    try {
+        const response = await fetch(API.expenses.recurring, {
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            container.innerHTML = `<p class="text-sm text-red-500">${escapeHtml(data.message || 'Failed to load recurring rules')}</p>`;
+            return;
+        }
+
+        renderRecurringExpenses(data.recurringExpenses || []);
+    } catch (error) {
+        console.error('Load recurring expenses error:', error);
+        container.innerHTML = '<p class="text-sm text-red-500">An error occurred while loading recurring rules.</p>';
+    }
+}
+
+function renderRecurringExpenses(recurringExpenses) {
+    const container = document.getElementById('recurring-list');
+    if (!container) return;
+
+    recurringRulesCache = recurringExpenses;
+
+    if (recurringExpenses.length === 0) {
+        container.innerHTML = '<p class="text-sm text-gray-500">No recurring rules yet. Create one from Add Expense page.</p>';
+        return;
+    }
+
+    container.innerHTML = recurringExpenses.map((item) => {
+        const safeCategory = escapeHtml(item.category || 'Other');
+        const safeDescription = escapeHtml(item.description || '-');
+        const safeFrequency = escapeHtml(item.frequency || 'monthly');
+        const safeNextRunDate = escapeHtml(formatDate(item.nextRunDate));
+        const statusBadge = item.isActive
+            ? '<span class="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>'
+            : '<span class="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">Paused</span>';
+
+        return `
+            <div class="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                    <p class="font-semibold text-gray-800">${safeCategory} · ₹${parseFloat(item.amount).toFixed(2)}</p>
+                    <p class="text-sm text-gray-600">${safeDescription}</p>
+                    <p class="text-xs text-gray-500 mt-1">${safeFrequency} · Next run: ${safeNextRunDate}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    ${statusBadge}
+                    <button onclick="openRecurringEditModal(${item.id})" class="px-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 transition">
+                        Edit
+                    </button>
+                    <button onclick="toggleRecurringStatus(${item.id}, ${item.isActive ? 'false' : 'true'})" class="px-3 py-2 bg-amber-500 text-white rounded-lg text-xs font-medium hover:bg-amber-600 transition">
+                        ${item.isActive ? 'Pause' : 'Activate'}
+                    </button>
+                    <button onclick="deleteRecurringRule(${item.id})" class="px-3 py-2 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function openRecurringEditModal(id) {
+    const recurringItem = recurringRulesCache.find((item) => Number(item.id) === Number(id));
+    if (!recurringItem) {
+        alert('Recurring rule not found. Please refresh.');
+        return;
+    }
+
+    document.getElementById('recurring-edit-id').value = recurringItem.id;
+    document.getElementById('recurring-edit-amount').value = recurringItem.amount;
+    document.getElementById('recurring-edit-category').value = recurringItem.category;
+    document.getElementById('recurring-edit-description').value = recurringItem.description || '';
+    document.getElementById('recurring-edit-frequency').value = recurringItem.frequency;
+    document.getElementById('recurring-edit-end-date').value = toDateInputValue(recurringItem.endDate);
+    document.getElementById('recurring-edit-active').checked = Boolean(recurringItem.isActive);
+
+    document.getElementById('recurring-edit-modal').classList.remove('hidden');
+}
+
+function closeRecurringEditModal() {
+    const modal = document.getElementById('recurring-edit-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+async function toggleRecurringStatus(id, isActive) {
+    try {
+        const response = await fetch(`${API.expenses.recurring}/${id}`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ isActive })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to update recurring rule');
+            return;
+        }
+
+        loadRecurringExpenses();
+    } catch (error) {
+        console.error('Toggle recurring status error:', error);
+        alert('An error occurred while updating recurring rule.');
+    }
+}
+
+async function deleteRecurringRule(id) {
+    if (!confirm('Delete this recurring rule?')) return;
+
+    try {
+        const response = await fetch(`${API.expenses.recurring}/${id}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to delete recurring rule');
+            return;
+        }
+
+        loadRecurringExpenses();
+    } catch (error) {
+        console.error('Delete recurring rule error:', error);
+        alert('An error occurred while deleting recurring rule.');
+    }
+}
+
+async function processRecurringNow() {
+    try {
+        const response = await fetch(API.expenses.recurringProcess, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to process recurring expenses');
+            return;
+        }
+
+        alert('Recurring expenses processed successfully.');
+        loadExpenses();
+        loadRecurringExpenses();
+    } catch (error) {
+        console.error('Process recurring now error:', error);
+        alert('An error occurred while processing recurring expenses.');
     }
 }
 
@@ -68,6 +296,7 @@ async function exportExpensesCsv() {
             alert(errorMessage);
             return;
         }
+
         const csvText = await response.text();
         const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
@@ -196,11 +425,11 @@ async function loadExpenses(filters = {}) {
         if (response.ok) {
             renderExpenses(data.expenses);
         }
-
     } catch (error) {
         console.error('Load expenses error:', error);
     }
 }
+
 const categoryEmoji = {
     'Food': '🍔',
     'Transport': '🚗',
@@ -234,7 +463,7 @@ function renderExpenses(expenses) {
 
     noExpenses.classList.add('hidden');
 
-    tbody.innerHTML = expenses.map(expense => {
+    tbody.innerHTML = expenses.map((expense) => {
         const category = expense.category || 'Other';
         const safeCategory = escapeHtml(category);
         const safeDescription = escapeHtml(expense.description || '-');
@@ -267,6 +496,7 @@ function renderExpenses(expenses) {
     `;
     }).join('');
 }
+
 function applyFilters() {
     const category = document.getElementById('filter-category').value;
     const startDate = document.getElementById('filter-start-date').value;
@@ -274,12 +504,14 @@ function applyFilters() {
 
     loadExpenses({ category, startDate, endDate });
 }
+
 function clearFilters() {
     document.getElementById('filter-category').value = '';
     document.getElementById('filter-start-date').value = '';
     document.getElementById('filter-end-date').value = '';
     loadExpenses();
 }
+
 async function openEditModal(id) {
     try {
         const response = await fetch(`${API.expenses.base}/${id}`, {
@@ -293,17 +525,19 @@ async function openEditModal(id) {
             document.getElementById('edit-amount').value = expense.amount;
             document.getElementById('edit-category').value = expense.category;
             document.getElementById('edit-description').value = expense.description || '';
-            document.getElementById('edit-date').value = expense.date;
-            
+            document.getElementById('edit-date').value = toDateInputValue(expense.date);
+
             document.getElementById('edit-modal').classList.remove('hidden');
         }
     } catch (error) {
         console.error('Open edit modal error:', error);
     }
 }
+
 function closeEditModal() {
     document.getElementById('edit-modal').classList.add('hidden');
 }
+
 document.getElementById('edit-form').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -332,6 +566,7 @@ document.getElementById('edit-form').addEventListener('submit', async (e) => {
         alert('An error occurred. Please try again.');
     }
 });
+
 async function deleteExpense(id) {
     if (!confirm('Are you sure you want to delete this expense?')) {
         return;
@@ -354,14 +589,26 @@ async function deleteExpense(id) {
         alert('An error occurred. Please try again.');
     }
 }
+
 function formatDate(dateString) {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', { 
-        day: 'numeric', 
-        month: 'short', 
-        year: 'numeric' 
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+    return date.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
     });
 }
+
+function toDateInputValue(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().split('T')[0];
+}
+
 function getCategoryClass(category) {
     const classes = {
         'Food': 'bg-blue-100 text-blue-800',

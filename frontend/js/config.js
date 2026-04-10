@@ -18,6 +18,7 @@ const API = {
     expenses: {
         base: `${API_BASE_URL}/expenses`,
         stats: `${API_BASE_URL}/expenses/stats`,
+        anomalies: `${API_BASE_URL}/expenses/anomalies`,
         recurring: `${API_BASE_URL}/expenses/recurring`,
         recurringProcess: `${API_BASE_URL}/expenses/recurring/process`
     }

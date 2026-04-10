@@ -495,3 +495,58 @@ exports.processRecurringNow = async (req, res) => {
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
+
+exports.getAnomalies = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const lookbackDays = 90;
+        const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - lookbackDays);
+
+        const expenses = await Expense.findAll({
+            where: {
+                userId,
+                date: {
+                    [Op.gte]: fromDate
+                }
+            },
+            order: [['amount', 'DESC']]
+        });
+
+        if (expenses.length < 5) {
+            return res.json({
+                anomalies: [],
+                message: 'Not enough data to detect anomalies yet.'
+            });
+        }
+
+        const amounts = expenses.map((exp) => parseFloat(exp.amount || 0));
+        const mean = amounts.reduce((sum, value) => sum + value, 0) / amounts.length;
+        const variance = amounts.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / amounts.length;
+        const stdDev = Math.sqrt(variance);
+        const threshold = mean + (1.5 * stdDev);
+
+        const anomalies = expenses
+            .filter((exp) => parseFloat(exp.amount || 0) > threshold)
+            .slice(0, 5)
+            .map((exp) => ({
+                id: exp.id,
+                date: exp.date,
+                category: exp.category,
+                description: exp.description || '',
+                amount: parseFloat(exp.amount || 0)
+            }));
+
+        res.json({
+            anomalies,
+            stats: {
+                threshold: Number(threshold.toFixed(2)),
+                average: Number(mean.toFixed(2)),
+                stdDev: Number(stdDev.toFixed(2))
+            }
+        });
+    } catch (error) {
+        console.error('Get anomalies error:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
